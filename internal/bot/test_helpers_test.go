@@ -24,11 +24,13 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 type wire struct {
-	mu                sync.Mutex
-	last              telegram.Text
-	sends, edits, acks int
-	fail              bool
-	next              int64
+	mu    sync.Mutex
+	last  telegram.Text
+	sends int
+	edits int
+	acks  int
+	fail  bool
+	next  int64
 }
 
 func (w *wire) serve(rw http.ResponseWriter, r *http.Request) {
