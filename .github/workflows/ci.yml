@@ -23,6 +23,8 @@ jobs:
         with:
           go-version: '1.27.1'
           cache: false
+      - name: Verify pinned SQLite dependency
+        run: go mod download -json github.com/mattn/go-sqlite3@v1.14.52
       - name: Format, vet, race tests and coverage
         run: make check
       - name: Reproducible offline scenario
