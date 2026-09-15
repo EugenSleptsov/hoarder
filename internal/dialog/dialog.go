@@ -40,6 +40,7 @@ type State struct {
 	WithReserve     bool      `json:"with_reserve"`
 	DurationDays    float64   `json:"duration_days"`
 	ClosedUnits     int       `json:"closed_units"`
+	ClosedAt        time.Time `json:"closed_at"`
 	Low             float64   `json:"low"`
 	High            float64   `json:"high"`
 	ObservedAt      time.Time `json:"observed_at"`
@@ -55,10 +56,7 @@ func New(id, itemID, name string, creating, reserve bool, revision uint64, histo
 	if !idPattern.MatchString(id) || itemID == "" || strings.TrimSpace(name) == "" {
 		return State{}, errors.New("invalid dialog identity")
 	}
-	step := Level
-	if reserve {
-		step = Closed
-	}
+	step := Closed
 	if creating {
 		step = Reserve
 	}
@@ -94,9 +92,6 @@ func (s State) Buttons() [][]Button {
 		rows = [][]Button{{{"Нет", "c0"}, {"Одна", "c1"}}, {{"Две", "c2"}, {"Три", "c3"}}}
 	case Level:
 		rows = [][]Button{{{"Полная", "p100"}, {"75%", "p75"}}, {{"50%", "p50"}, {"25%", "p25"}}, {{"Пусто", "p0"}}}
-		if !s.Creating && !s.NoUseSince.IsZero() {
-			rows = append(rows, []Button{{"Не использовали", "unused"}})
-		}
 	case History:
 		rows = [][]Button{{{"Не пополняли", "none"}}, {{"Пополняли / не помню", "maybe"}}}
 	case NoUse:
@@ -105,6 +100,9 @@ func (s State) Buttons() [][]Button {
 		return nil
 	default:
 		return nil
+	}
+	if !s.Creating && (s.Step == Closed || s.Step == Level) && !s.NoUseSince.IsZero() {
+		rows = append(rows, []Button{{"Не использовали", "unused"}})
 	}
 	if !s.Creating && s.Step != History && s.Step != NoUse {
 		rows = append(rows, []Button{{"Не знаю / не смотрел", "skip"}})
@@ -176,6 +174,10 @@ func (s State) Apply(generation uint64, action string, now time.Time) (State, er
 		n.Step = Done
 		return n, nil
 	}
+	if action == "unused" {
+		n.Step = NoUse
+		return n, nil
+	}
 	switch s.Step {
 	case Reserve:
 		n.WithReserve = action == "yes"
@@ -191,18 +193,16 @@ func (s State) Apply(generation uint64, action string, now time.Time) (State, er
 		case "du":
 			n.DurationDays = 30
 		}
-		n.Step = Level
-		if n.WithReserve {
-			n.Step = Closed
-		}
+		n.Step = Closed
 	case Closed:
 		count, _ := strconv.Atoi(action[1:])
 		n.ClosedUnits = count
+		n.ClosedAt = now
 		n.Step = Level
 	case Level:
-		if action == "unused" {
-			n.Step = NoUse
-			break
+		if s.ClosedAt.IsZero() || now.Before(s.ClosedAt) || now.Sub(s.ClosedAt) > 15*time.Minute {
+			n.Step = Closed
+			return n, nil
 		}
 		levels := map[string][2]float64{"p0": {0, 0}, "p25": {.125, .375}, "p50": {.375, .625}, "p75": {.625, .875}, "p100": {.875, 1}}
 		v := levels[action]
@@ -217,17 +217,14 @@ func (s State) Apply(generation uint64, action string, now time.Time) (State, er
 		// Do not combine an old stock check with a much later history answer.
 		if now.Before(s.ObservedAt) || now.Sub(s.ObservedAt) > 15*time.Minute {
 			n.ObservedAt = time.Time{}
-			n.Step = Level
-			if n.WithReserve {
-				n.Step = Closed
-			}
+			n.Step = Closed
 			return n, nil
 		}
 		n.HistoryComplete = action == "none"
 		n.Step = Done
 	case NoUse:
 		if action == "back" {
-			n.Step = Level
+			n.Step = Closed
 			break
 		}
 		n.Unused = true
