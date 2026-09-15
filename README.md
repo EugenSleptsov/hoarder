@@ -1,0 +1,2 @@
+# hoarder
+bot keeping items
