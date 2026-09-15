@@ -98,7 +98,8 @@ func TestLateHistoryRequiresNewStockCheck(t *testing.T) {
 }
 func TestEmptyDoesNotInventDepletionTimeOrAskHistory(t *testing.T) {
 	now := time.Now()
-	s := tap(t, start(t, false, false), "p0", now)
+	s := tap(t, start(t, false, false), "c0", now)
+	s = tap(t, s, "p0", now)
 	if s.Step != Done || s.Low != 0 || s.High != 0 || s.HistoryComplete {
 		t.Fatal(s)
 	}
@@ -121,4 +122,23 @@ func FuzzParse(f *testing.F) {
 			}
 		}
 	})
+}
+
+func TestPolicyDoesNotImplyPhysicalStock(t *testing.T) {
+	now := time.Date(2026, 9, 15, 21, 0, 0, 0, time.UTC)
+	s := start(t, true, false)
+	for _, a := range []string{"no", "d30", "c1", "p25"} {
+		s = tap(t, s, a, now)
+	}
+	if s.WithReserve || s.Low != 1.125 || s.High != 1.375 {
+		t.Fatal(s)
+	}
+}
+func TestStalePartialCountRequiresRecheck(t *testing.T) {
+	now := time.Date(2026, 9, 15, 21, 0, 0, 0, time.UTC)
+	s := tap(t, start(t, false, true), "c1", now)
+	s = tap(t, s, "p25", now.Add(16*time.Minute))
+	if s.Step != Closed || !s.ObservedAt.IsZero() {
+		t.Fatal(s)
+	}
 }
