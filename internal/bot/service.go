@@ -1,0 +1,254 @@
+// Package bot coordinates durable Telegram conversations and independent plans.
+package bot
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/EugenSleptsov/hoarder/internal/dialog"
+	"github.com/EugenSleptsov/hoarder/internal/schedule"
+	"github.com/EugenSleptsov/hoarder/internal/sqlstore"
+	"github.com/EugenSleptsov/hoarder/internal/telegram"
+)
+
+type Config struct {
+	Zone         string
+	Hour, Minute int
+	CatchUp      time.Duration
+}
+
+type Service struct {
+	db       *sqlstore.DB
+	daily    schedule.Daily
+	cfg      Config
+	delivery sync.Mutex // One sender in this process; deploy one process per database.
+}
+
+type action struct {
+	Label, Kind, ItemID, View string
+	Page                      int
+	IDs                       []string
+}
+
+type screen struct {
+	ID        string
+	Dialog    *dialog.State
+	Text      string
+	Actions   []action
+	MessageID int64
+	ExpiresAt time.Time
+	Used      bool
+}
+
+type receipt struct{ Hash, Notice string }
+
+type intent struct {
+	ItemID   string
+	OpenedAt time.Time
+}
+
+func New(ctx context.Context, db *sqlstore.DB, cfg Config) (*Service, error) {
+	if db == nil || cfg.CatchUp < time.Minute || cfg.CatchUp > 4*time.Hour {
+		return nil, errors.New("database and catch-up window between one minute and four hours required")
+	}
+	daily, e := schedule.New(cfg.Zone, cfg.Hour, cfg.Minute)
+	if e != nil {
+		return nil, e
+	}
+	s := &Service{db: db, daily: daily, cfg: cfg}
+	e = db.Transaction(ctx, func(tx *sqlstore.Tx) error {
+		var previous Config
+		e := tx.Get(ctx, "runtime", "settings", &previous)
+		if errors.Is(e, sqlstore.ErrNotFound) {
+			return tx.Put(ctx, "runtime", "settings", cfg)
+		}
+		if e != nil {
+			return e
+		}
+		if previous != cfg {
+			return errors.New("stored schedule differs; explicit rescheduling migration required")
+		}
+		return nil
+	})
+	return s, e
+}
+
+func opaqueID() (string, error) {
+	var b [12]byte
+	_, e := rand.Read(b[:])
+	return hex.EncodeToString(b[:]), e
+}
+func hash(v any) (string, error) {
+	b, e := json.Marshal(v)
+	if e != nil {
+		return "", e
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// Handle commits a durable decision before the polling cursor advances. It does
+// not make network calls. The caller acknowledges every callback after return.
+func (s *Service) Handle(ctx context.Context, u telegram.Update, now time.Time) (string, error) {
+	if now.IsZero() {
+		return "", errors.New("processing time required")
+	}
+	digest, e := hash(u)
+	if e != nil {
+		return "", e
+	}
+	notice := ""
+	e = s.db.Transaction(ctx, func(tx *sqlstore.Tx) error {
+		key := strconv.FormatInt(u.ID, 10)
+		var previous receipt
+		err := tx.Get(ctx, "update", key, &previous)
+		if err == nil {
+			if previous.Hash != digest {
+				return errors.New("update ID payload conflict")
+			}
+			notice = previous.Notice
+			return nil
+		}
+		if !errors.Is(err, sqlstore.ErrNotFound) {
+			return err
+		}
+		if u.Callback != nil {
+			notice, err = s.callback(ctx, tx, *u.Callback, now)
+		} else if u.Message != nil && u.Message.Chat.ID == s.db.Owner() && u.Message.Chat.Type == "private" {
+			err = s.command(ctx, tx, u.Message.Text, now)
+		}
+		if err != nil {
+			return err
+		}
+		if err = tx.Insert(ctx, "update", key, receipt{digest, notice}); err != nil {
+			return err
+		}
+		return tx.AdvanceOffset(ctx, u.ID)
+	})
+	return notice, e
+}
+
+func (s *Service) callback(ctx context.Context, tx *sqlstore.Tx, cb telegram.Callback, now time.Time) (string, error) {
+	if cb.ID == "" || cb.From.ID != s.db.Owner() || cb.Message == nil || cb.Message.ID <= 0 || cb.Message.Date == 0 || cb.Message.Chat.ID != s.db.Owner() || cb.Message.Chat.Type != "private" {
+		return "Нет доступа к этому вопросу.", nil
+	}
+	digest, e := hash(cb)
+	if e != nil {
+		return "", e
+	}
+	var prior receipt
+	e = tx.Get(ctx, "callback", cb.ID, &prior)
+	if e == nil {
+		if prior.Hash != digest {
+			return "Некорректный повтор ответа.", nil
+		}
+		return prior.Notice, nil
+	}
+	if !errors.Is(e, sqlstore.ErrNotFound) {
+		return "", e
+	}
+	notice, e := s.routeCallback(ctx, tx, cb, now)
+	if e != nil {
+		return "", e
+	}
+	return notice, tx.Insert(ctx, "callback", cb.ID, receipt{digest, notice})
+}
+
+func (s *Service) routeCallback(ctx context.Context, tx *sqlstore.Tx, cb telegram.Callback, now time.Time) (string, error) {
+	parts := strings.Split(cb.Data, ":")
+	if len(cb.Data) > 64 || len(parts) < 3 {
+		return "Некорректная кнопка.", nil
+	}
+	var v screen
+	e := tx.Get(ctx, "screen", parts[1], &v)
+	if errors.Is(e, sqlstore.ErrNotFound) {
+		return "Кнопка устарела. Откройте /items.", nil
+	}
+	if e != nil {
+		return "", e
+	}
+	if v.Used || !now.Before(v.ExpiresAt) || (v.MessageID != 0 && v.MessageID != cb.Message.ID) {
+		return "Кнопка устарела. Откройте /items.", nil
+	}
+	// An authenticated opaque callback can recover the send/commit crash window.
+	v.MessageID = cb.Message.ID
+	if parts[0] == "m1" && len(parts) == 3 {
+		n, err := strconv.Atoi(parts[2])
+		if err != nil || n < 0 || n >= len(v.Actions) || strconv.Itoa(n) != parts[2] {
+			return "Некорректная кнопка.", nil
+		}
+		v.Used = true
+		if e = tx.Put(ctx, "screen", v.ID, v); e != nil {
+			return "", e
+		}
+		a := v.Actions[n]
+		switch a.Kind {
+		case "check", "bought":
+			return "", s.beginCheck(ctx, tx, a.ItemID, a.Kind == "bought", v.MessageID, now)
+		case "page":
+			return "", s.menu(ctx, tx, a.View, a.Page, a.IDs, v.MessageID, now)
+		case "view":
+			return "", s.menu(ctx, tx, a.View, 0, nil, v.MessageID, now)
+		case "add":
+			if e = tx.Put(ctx, "runtime", "awaiting_name", true); e != nil {
+				return "", e
+			}
+			return "", s.note(ctx, tx, "Введите название предмета одним сообщением (до 80 символов).", []action{{Label: "Отмена", Kind: "cancel_add"}}, v.MessageID, now)
+		case "cancel_add":
+			if e = tx.Put(ctx, "runtime", "awaiting_name", false); e != nil {
+				return "", e
+			}
+			return "Отменено.", s.menu(ctx, tx, "all", 0, nil, v.MessageID, now)
+		default:
+			return "Некорректная кнопка.", nil
+		}
+	}
+	id, g, a, e := dialog.Parse(cb.Data)
+	if e != nil || id != v.ID || v.Dialog == nil {
+		return "Некорректная кнопка.", nil
+	}
+	d := *v.Dialog
+	var active string
+	if e = tx.Get(ctx, "active", d.ItemID, &active); errors.Is(e, sqlstore.ErrNotFound) {
+		return "Этот вопрос уже закрыт.", nil
+	} else if e != nil {
+		return "", e
+	}
+	if active != v.ID {
+		return "Есть более новый вопрос. Откройте /items.", nil
+	}
+	if !d.Creating {
+		current, err := tx.LoadItem(ctx, d.ItemID)
+		if err != nil {
+			return "", err
+		}
+		if current.Revision != d.ItemRevision {
+			return "Остаток уже обновлён. Откройте /items.", nil
+		}
+	}
+	next, e := d.Apply(g, a, now)
+	if e != nil {
+		return "Эта кнопка уже не действует.", nil
+	}
+	v.Dialog = &next
+	if next.Step == dialog.Done {
+		if e = s.finish(ctx, tx, &v, now); e != nil {
+			return "", e
+		}
+		if e = tx.Delete(ctx, "active", d.ItemID); e != nil {
+			return "", e
+		}
+	}
+	if e = tx.Put(ctx, "screen", v.ID, v); e != nil {
+		return "", e
+	}
+	return "Ответ принят.", s.queue(ctx, tx, v.ID, now, false, "")
+}
