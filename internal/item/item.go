@@ -60,6 +60,10 @@ type Anchor struct {
 }
 
 type State struct {
+	// Controls are not observations and do not freeze physical consumption.
+	Paused      bool              `json:"paused,omitempty"`
+	Archived    bool              `json:"archived,omitempty"`
+	ControlAt   *time.Time        `json:"control_at,omitempty"`
 	Config      Config            `json:"config"`
 	Stock       Interval          `json:"stock"`
 	Rate        Interval          `json:"rate"`
@@ -80,6 +84,9 @@ func New(c Config, stock, rate Interval, at time.Time) (State, error) {
 }
 
 func (s State) Validate() error {
+	if s.Archived && !s.Paused || s.ControlAt != nil && s.ControlAt.IsZero() {
+		return errors.New("invalid lifecycle state")
+	}
 	if err := s.Config.Validate(); err != nil {
 		return err
 	}
@@ -123,6 +130,7 @@ const (
 )
 
 type Event struct {
+	Configuration   *Config   `json:"configuration,omitempty"`
 	ID              string    `json:"id"`
 	ItemID          string    `json:"item_id"`
 	Kind            Kind      `json:"kind"`
@@ -156,7 +164,10 @@ func (s State) Apply(e Event) (State, error) {
 		}
 		return s, nil
 	}
-	if e.At.Before(s.AsOf) {
+	if e.Configuration != nil && e.Kind != Reconfigure {
+		return s, errors.New("configuration payload requires a configuration event")
+	}
+	if e.At.Before(s.AsOf) || s.ControlAt != nil && e.At.Before(*s.ControlAt) {
 		return s, errors.New("out-of-order event requires replay")
 	}
 	n := s
@@ -167,6 +178,11 @@ func (s State) Apply(e Event) (State, error) {
 	n.Stock, n.AsOf, n.LastContact = projected, e.At, e.At
 	n.LastNote = ""
 	switch e.Kind {
+	case Pause, Resume, Archive, Restore, Reconfigure:
+		n, err = s.applyControl(e)
+		if err != nil {
+			return s, err
+		}
 	case Snapshot:
 		// Training uses only uncensored, confirmed no-addition intervals.
 		// Even a known addition may conceal a period with no stock available.
