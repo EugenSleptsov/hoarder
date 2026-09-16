@@ -103,7 +103,7 @@ func Open(ctx context.Context, path string, owner int64) (*DB, error) {
 			if _, e := t.tx.ExecContext(ctx, "INSERT INTO metadata(key,value) VALUES('owner',?)", strconv.FormatInt(owner, 10)); e != nil {
 				return e
 			}
-		} else if version != 1 {
+		} else if version != 1 && version != 2 {
 			return errors.New("unsupported database schema version")
 		}
 		var stored string
@@ -112,6 +112,13 @@ func Open(ctx context.Context, path string, owner int64) (*DB, error) {
 		}
 		if stored != strconv.FormatInt(owner, 10) {
 			return errors.New("database belongs to a different owner")
+		}
+		// Schema v2 is a reader-compatibility fence: earlier binaries do not
+		// understand lifecycle/configuration events and must refuse this database.
+		// JSON adds optional fields; old snapshots and receipts are not rewritten.
+		if version < 2 {
+			_, e := t.tx.ExecContext(ctx, "PRAGMA user_version=2")
+			return e
 		}
 		return nil
 	})
