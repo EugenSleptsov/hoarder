@@ -90,8 +90,10 @@ func (c *Client) Updates(ctx context.Context, offset int64) ([]Update, error) {
 	if offset < 0 {
 		return nil, errors.New("negative offsets may discard updates and are not supported")
 	}
+	// Bound the batch: 100 legal 4096-character Unicode messages can exceed
+	// the response-size guard and otherwise poison the unchanged polling cursor.
 	var result []Update
-	err := c.call(ctx, "getUpdates", map[string]any{"offset": offset, "timeout": 30, "allowed_updates": []string{"message", "callback_query"}}, &result)
+	err := c.call(ctx, "getUpdates", map[string]any{"offset": offset, "limit": 20, "timeout": 30, "allowed_updates": []string{"message", "callback_query"}}, &result)
 	return result, err
 }
 
