@@ -30,6 +30,8 @@ type Button struct{ Label, Action string }
 // State is saved after EVERY transition, not only after the last answer.
 // ID is a random opaque value supplied by the application (12 random bytes).
 type State struct {
+	Quick           bool      `json:"quick,omitempty"`
+	DurationHint    bool      `json:"duration_hint,omitempty"`
 	ID              string    `json:"id"`
 	ItemID          string    `json:"item_id"`
 	Name            string    `json:"name"`
@@ -82,6 +84,9 @@ func Parse(data string) (id string, generation uint64, action string, err error)
 }
 
 func (s State) Buttons() [][]Button {
+	if s.Creating && s.Quick {
+		return s.quickButtons()
+	}
 	var rows [][]Button
 	switch s.Step {
 	case Reserve:
@@ -112,6 +117,9 @@ func (s State) Buttons() [][]Button {
 }
 
 func (s State) Text() string {
+	if s.Creating && s.Quick {
+		return s.quickText()
+	}
 	prefix := s.Name + "\n\n"
 	switch s.Step {
 	case Reserve:
@@ -167,6 +175,9 @@ func (s State) Apply(generation uint64, action string, now time.Time) (State, er
 		n.Cancelled = true
 		n.Step = Done
 		return n, nil
+	}
+	if s.Creating && s.Quick {
+		return s.applyQuick(n, action, now)
 	}
 	if action == "skip" {
 		n.Unknown = true
