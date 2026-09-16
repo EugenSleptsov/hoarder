@@ -1,25 +1,43 @@
 # Item lifecycle and explicit settings
 
-Status: implementation in progress. This document is a contract, not evidence that all controls are already wired.
+Status: implemented initial slice, 2026-09-16. Code and tests live in `internal/item/controls.go`, `internal/bot/management.go` and their regression tests. This does not establish production readiness or forecasting accuracy.
 
-## Invariants
+## User flow
 
-- Lifecycle and configuration changes affect exactly one item. Other items' evidence and selected dates remain unchanged.
-- Pause only suppresses proactive questions and shopping reminders. It never asserts zero use, changes the consumption rate or re-anchors physical stock.
-- Resume restores the stored plan, including an overdue deadline. It does not restart the forecast from a full package or send an unsolicited message outside the daily window.
-- Removal from the registry is reversible archival with explicit confirmation. Inventory and immutable observation history are retained. Restore returns the item to paused status, so reactivation is deliberate.
-- Reserve/lead-time/check-gap changes must be explicit, revision-checked commands with an audit trail. Increasing a reserve is never a reaction to prediction error. Policy changes do not add physical stock.
-- Old observation, settings and confirmation buttons cannot overwrite newer inventory or lifecycle state. Reject them as stale and acknowledge the callback.
-- Selection and daily-delivery rendering exclude paused/archived items even when a previously built menu still contains their IDs. No global question cap or competition is introduced.
+`/manage` or the registry's management button opens a list of non-archived items. Each item card exposes a manual stock check, settings, pause/resume and archive confirmation. `/archive` lists archived items and offers restoration onto pause. Normal stock checks retain their previous direct path; management is not an extra mandatory step.
 
-## Planned button flow
+Settings offer fixed reserve 0/1 package, purchase lead time 1/3/7/14 days and maximum observation gap 7/30/90/180 days. Selecting a value displays the old and new configuration; only confirmation changes it. Saving identical configuration is a no-op for the item revision, history and dates.
 
-The registry retains quick stock checks. A separate item-management menu opens a card with current configuration and controls: pause/resume, settings, archive confirmation. An archive view offers restoration. Settings are finite button choices for the fixed reserve, purchase lead time and maximum observation gap. Any proposed change has a confirm/cancel screen.
+## State semantics
 
-All screens bind server-side opaque action data to inventory revision and lifecycle version. One accepted action consumes the screen. Durable update/callback receipts remain the first line of duplicate protection. Network sends stay outside transactions.
+Pause suppresses proactive questions and hides the item's shopping recommendation. It does not assert no-use, change the rate, update a physical anchor or reset the forecast. Manual observation remains possible without resuming notifications.
 
-## Acceptance
+Pause, resume, archive and restore preserve the previously selected plan date. Only its expected item revision changes. Resume does not move an overdue deadline into the future or send an unsolicited message outside the daily window. Restore clears the archived flag but leaves the item paused; reactivation is explicit.
 
-Tests must cover pause without stock mutation, overdue resume, archive/cancel/restore, old question and old settings buttons, repeated and competing confirmations, no influence on a second item, pending digest filtering, transactional rollback, database reopen and replay of explicit configuration events. Existing schema-v1 data remains readable; lifecycle defaults to active for an item without a control record.
+Archival requires confirmation and retains immutable history. It is not secure erasure. Names and observations may also remain in backups and Telegram history. An archived name cannot be reused through ordinary onboarding; restore the original item instead.
 
-An archive is not secure erasure. Database backups and Telegram message history may retain names and earlier observations. Permanent deletion and regulatory erasure are outside this control.
+An explicit configuration change preserves physical evidence, rates and samples. It recalculates only that item's plan and purchase recommendation. Neither enabling a reserve nor increasing lead time adds stock. The algorithm never changes the reserve automatically. Resume also reconciles the recommendation against current projected stock without changing evidence or the saved plan date.
+
+## Events and compatibility
+
+`pause`, `resume`, `archive`, `restore` and `reconfigure` are immutable item events. `Paused`, `Archived` and optional `ControlAt` belong to the same aggregate, using the same revision as observations. `ControlAt` guards chronology but is not a physical observation time. Future stock projection continues from the original physical anchor.
+
+Configuration is an optional event payload omitted for legacy events. Existing receipt hashes retain their original encoding. Replay starts from the original stored state and applies observation and control events in sequence. Events, projection, plan, intent, invalidated active question, callback receipt and response outbox share one transaction.
+
+Schema v2 keeps the existing table layout but fences out older binaries that do not understand lifecycle state. Startup upgrades v1 after checking ownership; historical JSON and events are not rewritten. Missing lifecycle fields in old items mean active. Back up with the old binary before the first new-version open. Do not manually downgrade `user_version`.
+
+## Callback and delivery safety
+
+Management actions are server-side and bound to an opaque screen, allowed action, owner, source message and expected item revision. Old settings, archive confirmations and stock answers cannot overwrite newer state. Each accepted menu action consumes its screen. A lifecycle/configuration change invalidates an unfinished stock dialog for that item.
+
+Previously built page IDs are only candidates; presentation is filtered against each item's current state. Immediately before proactive delivery, an inactive or no-longer-due item is removed. If no items remain, the pending digest is cancelled. If actions change, a new opaque screen is queued: old callback indices are never rebound to different items. Remaining eligible items keep their own plan dates and no global cap is introduced.
+
+SQLite cannot atomically cancel a request already in flight to Telegram. A message can arrive after a concurrent pause, but stale callback checks still prevent an old observation from overriding the control. First-send duplicate-message limitations remain documented in `running.md`.
+
+## Regression coverage
+
+Tests cover pause without evidence changes, overdue resume, cancellation and confirmation of archival, restored pause, manual checks while paused, stale stock and settings screens, competing confirmations, wrong sender, no-op settings, independent second-item state/plan, recommendation reconciliation, pending digest filtering, transaction rollback, database reopen and mixed legacy/control replay. They run on fake Telegram HTTP and real temporary SQLite, not a live chat.
+
+## Still outside this slice
+
+Renaming, package-unit conversion, arbitrary numeric settings, permanent data erasure, correcting old events, shared schedule migration, multi-user control and automatic cleanup remain separate work. The forecasting algorithm and seasonal-learning limitations are unchanged.
