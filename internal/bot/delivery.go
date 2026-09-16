@@ -12,6 +12,7 @@ import (
 )
 
 type delivery struct {
+	ClearOnly   bool
 	ScreenID    string
 	NextAttempt time.Time
 	Proactive   bool
@@ -28,9 +29,19 @@ type session struct {
 type Messenger interface {
 	Send(context.Context, telegram.Text) (telegram.Message, error)
 	Edit(context.Context, telegram.Text) error
+	ClearKeyboard(context.Context, int64, int64) error
 }
 
 func (s *Service) queue(ctx context.Context, tx *sqlstore.Tx, id string, now time.Time, proactive bool, date string) error {
+	var v screen
+	if err := tx.Get(ctx, "screen", id, &v); err != nil {
+		return err
+	}
+	if v.MessageID > 0 {
+		if err := tx.Put(ctx, "message_screen", messageKey(v.MessageID), id); err != nil {
+			return err
+		}
+	}
 	return tx.Put(ctx, "delivery", id, delivery{ScreenID: id, NextAttempt: now, Proactive: proactive, Date: date})
 }
 func (s *Service) window(now time.Time) (string, bool, error) {
@@ -112,7 +123,7 @@ func (s *Service) Flush(ctx context.Context, api Messenger, now time.Time) error
 			if e != nil {
 				return e
 			}
-			if v.Used || !now.Before(v.ExpiresAt) {
+			if !job.ClearOnly && (v.Used || !now.Before(v.ExpiresAt)) {
 				skip = true
 			}
 			if job.Proactive {
@@ -124,7 +135,15 @@ func (s *Service) Flush(ctx context.Context, api Messenger, now time.Time) error
 					skip = true
 				}
 			}
-			if !skip {
+			if !skip && v.MessageID > 0 {
+				var err error
+				current, err := s.ownsMessage(ctx, tx, v)
+				if err != nil {
+					return err
+				}
+				skip = !current
+			}
+			if !skip && !job.ClearOnly {
 				var err error
 				skip, err = s.refreshPending(ctx, tx, &v, job, now)
 				if err != nil {
@@ -144,7 +163,9 @@ func (s *Service) Flush(ctx context.Context, api Messenger, now time.Time) error
 		}
 		text := render(v, s.db.Owner())
 		var sent telegram.Message
-		if v.MessageID == 0 {
+		if job.ClearOnly {
+			e = api.ClearKeyboard(ctx, s.db.Owner(), v.MessageID)
+		} else if v.MessageID == 0 {
 			sent, e = api.Send(ctx, text)
 		} else {
 			e = api.Edit(ctx, text)
@@ -191,6 +212,32 @@ func (s *Service) Flush(ctx context.Context, api Messenger, now time.Time) error
 			}
 			if err := tx.Put(ctx, "screen", v.ID, latest); err != nil {
 				return err
+			}
+			current, err := s.ownsMessage(ctx, tx, latest)
+			if err != nil {
+				return err
+			}
+			if !current {
+				var currentID string
+				if err = tx.Get(ctx, "message_screen", messageKey(latest.MessageID), &currentID); err != nil {
+					return err
+				}
+				if err = s.queue(ctx, tx, currentID, now, false, ""); err != nil {
+					return err
+				}
+				return tx.Delete(ctx, "delivery", v.ID)
+			}
+			if latest.MessageID > 0 {
+				if err = tx.Put(ctx, "message_screen", messageKey(latest.MessageID), latest.ID); err != nil {
+					return err
+				}
+			}
+			if job.ClearOnly {
+				return tx.Delete(ctx, "delivery", v.ID)
+			}
+			// A retired screen may have been in flight while a different message replaced it.
+			if latest.Used {
+				return s.retireScreen(ctx, tx, latest, now)
 			}
 			// If a callback advanced this screen in flight, retain its reconciliation.
 			before, _ := hash(v.Dialog)

@@ -24,13 +24,15 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 type wire struct {
-	mu    sync.Mutex
-	last  telegram.Text
-	sends int
-	edits int
-	acks  int
-	fail  bool
-	next  int64
+	messages map[int64]telegram.Text
+	clears   int
+	mu       sync.Mutex
+	last     telegram.Text
+	sends    int
+	edits    int
+	acks     int
+	fail     bool
+	next     int64
 }
 
 func (w *wire) serve(rw http.ResponseWriter, r *http.Request) {
@@ -57,13 +59,23 @@ func (w *wire) serve(rw http.ResponseWriter, r *http.Request) {
 		w.sends++
 		w.next++
 		text.MessageID = w.next
+	} else if method == "editMessageReplyMarkup" {
+		w.clears++
+		old := w.messages[text.MessageID]
+		text.Text = old.Text
 	} else if method == "editMessageText" {
 		w.edits++
 	} else {
 		rw.WriteHeader(404)
 		return
 	}
-	w.last = text
+	if w.messages == nil {
+		w.messages = make(map[int64]telegram.Text)
+	}
+	w.messages[text.MessageID] = text
+	if method != "editMessageReplyMarkup" || w.last.MessageID == text.MessageID {
+		w.last = text
+	}
 	msg := telegram.Message{ID: text.MessageID, Date: 1, Chat: telegram.Chat{ID: text.ChatID, Type: "private"}, Text: text.Text}
 	json.NewEncoder(rw).Encode(map[string]any{"ok": true, "result": msg})
 }
@@ -213,3 +225,9 @@ func (w *wire) sendCount() int { w.mu.Lock(); defer w.mu.Unlock(); return w.send
 func (w *wire) editCount() int { w.mu.Lock(); defer w.mu.Unlock(); return w.edits }
 func (w *wire) ackCount() int  { w.mu.Lock(); defer w.mu.Unlock(); return w.acks }
 func (w *wire) setFail(v bool) { w.mu.Lock(); defer w.mu.Unlock(); w.fail = v }
+
+func (w *wire) message(id int64) telegram.Text {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.messages[id]
+}

@@ -186,11 +186,21 @@ func (s *Service) routeCallback(ctx context.Context, tx *sqlstore.Tx, cb telegra
 	if e != nil {
 		return "", e
 	}
-	if v.Used || !now.Before(v.ExpiresAt) || (v.MessageID != 0 && v.MessageID != cb.Message.ID) {
+	if v.MessageID != 0 && v.MessageID != cb.Message.ID {
 		return "Кнопка устарела. Откройте /items.", nil
 	}
 	// An authenticated opaque callback can recover the send/commit crash window.
 	v.MessageID = cb.Message.ID
+	owned, err := s.ownsMessage(ctx, tx, v)
+	if err != nil {
+		return "", err
+	}
+	if !owned {
+		return "В этом сообщении уже другой экран.", nil
+	}
+	if v.Used || !now.Before(v.ExpiresAt) {
+		return "Кнопка устарела. Откройте /items.", s.retireScreen(ctx, tx, v, now)
+	}
 	if parts[0] == "m1" && len(parts) == 3 {
 		n, err := strconv.Atoi(parts[2])
 		if err != nil || n < 0 || n >= len(v.Actions) || strconv.Itoa(n) != parts[2] {
@@ -203,7 +213,11 @@ func (s *Service) routeCallback(ctx context.Context, tx *sqlstore.Tx, cb telegra
 		a := v.Actions[n]
 		switch a.Kind {
 		case "manage", "settings", "setting", "config_preview", "archive_preview", "control":
-			return s.managementCallback(ctx, tx, a, v.ID, v.MessageID, now)
+			notice, err := s.managementCallback(ctx, tx, a, v.ID, v.MessageID, now)
+			if err == nil && notice != "" {
+				err = s.retireScreen(ctx, tx, v, now)
+			}
+			return notice, err
 		case "check", "bought":
 			if a.Bound {
 				current, err := tx.LoadItem(ctx, a.ItemID)
@@ -211,7 +225,7 @@ func (s *Service) routeCallback(ctx context.Context, tx *sqlstore.Tx, cb telegra
 					return "", err
 				}
 				if current.Archived || current.Revision != a.ExpectedRevision {
-					return "Предмет изменён. Откройте /items.", nil
+					return "Предмет изменён. Откройте /items.", s.retireScreen(ctx, tx, v, now)
 				}
 			}
 			return "", s.beginCheck(ctx, tx, a.ItemID, a.Kind == "bought", v.MessageID, now)
@@ -240,12 +254,12 @@ func (s *Service) routeCallback(ctx context.Context, tx *sqlstore.Tx, cb telegra
 	d := *v.Dialog
 	var active string
 	if e = tx.Get(ctx, "active", d.ItemID, &active); errors.Is(e, sqlstore.ErrNotFound) {
-		return "Этот вопрос уже закрыт.", nil
+		return "Этот вопрос уже закрыт.", s.retireScreen(ctx, tx, v, now)
 	} else if e != nil {
 		return "", e
 	}
 	if active != v.ID {
-		return "Есть более новый вопрос. Откройте /items.", nil
+		return "Есть более новый вопрос. Откройте /items.", s.retireScreen(ctx, tx, v, now)
 	}
 	if !d.Creating {
 		current, err := tx.LoadItem(ctx, d.ItemID)
@@ -253,12 +267,12 @@ func (s *Service) routeCallback(ctx context.Context, tx *sqlstore.Tx, cb telegra
 			return "", err
 		}
 		if current.Archived || current.Revision != d.ItemRevision {
-			return "Остаток уже обновлён. Откройте /items.", nil
+			return "Остаток уже обновлён. Откройте /items.", s.retireScreen(ctx, tx, v, now)
 		}
 	}
 	next, e := d.Apply(g, a, now)
 	if e != nil {
-		return "Эта кнопка уже не действует.", nil
+		return "Эта кнопка уже не действует.", s.queue(ctx, tx, v.ID, now, false, "")
 	}
 	v.Dialog = &next
 	if next.Step == dialog.Done {

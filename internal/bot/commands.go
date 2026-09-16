@@ -88,6 +88,9 @@ func (s *Service) command(ctx context.Context, tx *sqlstore.Tx, text string, now
 }
 
 func (s *Service) saveNewDialog(ctx context.Context, tx *sqlstore.Tx, d dialog.State, messageID int64, now time.Time) error {
+	if err := s.invalidateQuestion(ctx, tx, d.ItemID, now); err != nil {
+		return err
+	}
 	v := screen{ID: d.ID, Dialog: &d, MessageID: messageID, ExpiresAt: now.Add(7 * 24 * time.Hour)}
 	if e := tx.Insert(ctx, "screen", v.ID, v); e != nil {
 		return e
@@ -124,7 +127,8 @@ func (s *Service) beginCheck(ctx context.Context, tx *sqlstore.Tx, id string, bo
 func (s *Service) finish(ctx context.Context, tx *sqlstore.Tx, v *screen, now time.Time) error {
 	d := *v.Dialog
 	v.Text = d.Text()
-	v.Actions = []action{{Label: "Остальные вопросы", Kind: "view", View: "due"}, {Label: "Список покупок", Kind: "view", View: "shop"}, {Label: "Все предметы", Kind: "view", View: "all"}}
+	v.Actions = nil // A finished answer is a receipt, not another keyboard.
+	v.Text += "\n/items — предметы · /add — добавить · /today — вопросы"
 	if d.Cancelled {
 		return nil
 	}

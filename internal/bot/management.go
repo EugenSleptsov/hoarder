@@ -184,13 +184,13 @@ func (s *Service) applyControl(ctx context.Context, tx *sqlstore.Tx, state item.
 			return "", err
 		}
 	}
-	if err = s.invalidateQuestion(ctx, tx, state.Config.ID); err != nil {
+	if err = s.invalidateQuestion(ctx, tx, state.Config.ID, now); err != nil {
 		return "", err
 	}
 	return "Изменение сохранено.", s.managementCard(ctx, tx, next, messageID, now)
 }
 
-func (s *Service) invalidateQuestion(ctx context.Context, tx *sqlstore.Tx, id string) error {
+func (s *Service) invalidateQuestion(ctx context.Context, tx *sqlstore.Tx, id string, now time.Time) error {
 	var active string
 	err := tx.Get(ctx, "active", id, &active)
 	if errors.Is(err, sqlstore.ErrNotFound) {
@@ -203,11 +203,7 @@ func (s *Service) invalidateQuestion(ctx context.Context, tx *sqlstore.Tx, id st
 	if err = tx.Get(ctx, "screen", active, &v); err != nil {
 		return err
 	}
-	v.Used = true
-	if err = tx.Put(ctx, "screen", active, v); err != nil {
-		return err
-	}
-	if err = tx.Delete(ctx, "delivery", active); err != nil {
+	if err = s.retireScreen(ctx, tx, v, now); err != nil {
 		return err
 	}
 	return tx.Delete(ctx, "active", id)
