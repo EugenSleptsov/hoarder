@@ -234,15 +234,11 @@ func (s *Service) routeCallback(ctx context.Context, tx *sqlstore.Tx, cb telegra
 		case "view":
 			return "", s.menu(ctx, tx, a.View, 0, nil, v.MessageID, now)
 		case "add":
-			if e = tx.Put(ctx, "runtime", "awaiting_name", true); e != nil {
-				return "", e
-			}
-			return "", s.note(ctx, tx, "Введите название предмета одним сообщением (до 80 символов).", []action{{Label: "Отмена", Kind: "cancel_add"}}, v.MessageID, now)
+			return "", s.beginAdding(ctx, tx, v.MessageID, now)
+		case "add_name":
+			return "", s.beginNames(ctx, tx, a.Field, v.MessageID, now)
 		case "cancel_add":
-			if e = tx.Put(ctx, "runtime", "awaiting_name", false); e != nil {
-				return "", e
-			}
-			return "Отменено.", s.menu(ctx, tx, "all", 0, nil, v.MessageID, now)
+			return "Отменено.", s.cancelAdding(ctx, tx, v.MessageID, now)
 		default:
 			return "Некорректная кнопка.", nil
 		}
@@ -286,5 +282,13 @@ func (s *Service) routeCallback(ctx context.Context, tx *sqlstore.Tx, cb telegra
 	if e = tx.Put(ctx, "screen", v.ID, v); e != nil {
 		return "", e
 	}
-	return "Ответ принят.", s.queue(ctx, tx, v.ID, now, false, "")
+	if e = s.queue(ctx, tx, v.ID, now, false, ""); e != nil {
+		return "", e
+	}
+	if next.Step == dialog.Done {
+		if e = s.advanceAdding(ctx, tx, v, now); e != nil {
+			return "", e
+		}
+	}
+	return "Ответ принят.", nil
 }

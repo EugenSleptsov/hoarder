@@ -20,15 +20,16 @@ func TestCallbackOnboardingSurvivesRestart(t *testing.T) {
 	h.press("Добавить предмет")
 	h.command("Паста")
 	h.press("С резервом")
-	h.press("Около месяца")
+	h.press("Указать остаток")
 	h.press("Одна")
 	h.reopen()
 	h.press("50%")
+	h.press("Добавить")
 	state := h.state("Паста")
 	if state.Stock != (item.Interval{Low: 1.375, High: 1.625}) || state.Config.ReserveUnits != 1 || state.Revision != 0 {
 		t.Fatal(state)
 	}
-	if h.wire.ackCount() != 5 || h.wire.editCount() < 4 {
+	if h.wire.ackCount() != 6 || h.wire.editCount() < 4 {
 		t.Fatal("callbacks not acknowledged/edited", h.wire.ackCount(), h.wire.editCount())
 	}
 	if e := h.db.Transaction(testContext, func(tx *sqlstore.Tx) error {

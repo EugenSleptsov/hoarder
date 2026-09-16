@@ -5,8 +5,6 @@ import (
 	"errors"
 	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/EugenSleptsov/hoarder/internal/app"
 	"github.com/EugenSleptsov/hoarder/internal/dialog"
@@ -33,7 +31,7 @@ func (s *Service) command(ctx context.Context, tx *sqlstore.Tx, text string, now
 		return s.menu(ctx, tx, "shop", 0, nil, 0, now)
 	}
 	if text == "/cancel" {
-		return tx.Put(ctx, "runtime", "awaiting_name", false)
+		return s.cancelAdding(ctx, tx, 0, now)
 	}
 	name := ""
 	if strings.HasPrefix(text, "/add ") {
@@ -49,42 +47,12 @@ func (s *Service) command(ctx context.Context, tx *sqlstore.Tx, text string, now
 		}
 	}
 	if text == "/add" {
-		if e := tx.Put(ctx, "runtime", "awaiting_name", true); e != nil {
-			return e
-		}
-		return s.note(ctx, tx, "Введите название предмета одним сообщением.", []action{{Label: "Отмена", Kind: "cancel_add"}}, 0, now)
+		return s.beginAdding(ctx, tx, 0, now)
 	}
 	if name == "" {
-		return s.note(ctx, tx, "Команды: /items, /today, /shopping, /add, /manage, /archive. Ответы на вопросы — кнопками.", nil, 0, now)
+		return s.note(ctx, tx, "Команды: /items, /today, /shopping, /add, /manage, /archive. Ответы — кнопками.", nil, 0, now)
 	}
-	if utf8.RuneCountInString(name) > 80 || strings.IndexFunc(name, unicode.IsControl) >= 0 {
-		return s.note(ctx, tx, "Название: одна строка, не более 80 символов.", nil, 0, now)
-	}
-	items, e := tx.Items(ctx)
-	if e != nil {
-		return e
-	}
-	for _, existing := range items {
-		if strings.EqualFold(existing.Config.Name, name) {
-			destination := "/items"
-			if existing.Archived {
-				destination = "/archive"
-			}
-			return s.note(ctx, tx, "Предмет с таким названием уже есть. Откройте "+destination+".", nil, 0, now)
-		}
-	}
-	id, e := opaqueID()
-	if e != nil {
-		return e
-	}
-	d, e := dialog.New(id, id, name, true, false, 0, time.Time{}, time.Time{})
-	if e != nil {
-		return e
-	}
-	if e = tx.Put(ctx, "runtime", "awaiting_name", false); e != nil {
-		return e
-	}
-	return s.saveNewDialog(ctx, tx, d, 0, now)
+	return s.beginNames(ctx, tx, name, 0, now)
 }
 
 func (s *Service) saveNewDialog(ctx context.Context, tx *sqlstore.Tx, d dialog.State, messageID int64, now time.Time) error {
@@ -135,6 +103,16 @@ func (s *Service) finish(ctx context.Context, tx *sqlstore.Tx, v *screen, now ti
 	var state item.State
 	var e error
 	if d.Creating {
+		states, err := tx.Items(ctx)
+		if err != nil {
+			return err
+		}
+		for _, existing := range states {
+			if strings.EqualFold(existing.Config.Name, d.Name) {
+				v.Text = "Предмет с таким названием уже существует. Дубликат не создан.\n/items · /archive"
+				return nil
+			}
+		}
 		reserve := 0.0
 		if d.WithReserve {
 			reserve = 1

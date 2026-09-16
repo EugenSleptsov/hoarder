@@ -73,7 +73,7 @@ func (w *wire) serve(rw http.ResponseWriter, r *http.Request) {
 		w.messages = make(map[int64]telegram.Text)
 	}
 	w.messages[text.MessageID] = text
-	if method != "editMessageReplyMarkup" || w.last.MessageID == text.MessageID {
+	if text.MessageID >= w.last.MessageID {
 		w.last = text
 	}
 	msg := telegram.Message{ID: text.MessageID, Date: 1, Chat: telegram.Chat{ID: text.ChatID, Type: "private"}, Text: text.Text}
@@ -191,9 +191,10 @@ func (h *harness) add(name string, reserve bool, closed, level string) {
 	} else {
 		h.press("Без резерва")
 	}
-	h.press("Около месяца")
+	h.press("Указать остаток")
 	h.press(closed)
 	h.press(level)
+	h.press("Добавить")
 }
 func (h *harness) state(name string) item.State {
 	h.t.Helper()

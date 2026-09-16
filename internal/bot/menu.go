@@ -105,7 +105,7 @@ func render(v screen, owner int64) telegram.Text {
 	text := v.Text
 	rows := [][]telegram.Button{}
 	if v.Dialog != nil && v.Dialog.Step != dialog.Done {
-		text = v.Dialog.Text()
+		text = v.Text + v.Dialog.Text()
 		for _, row := range v.Dialog.Buttons() {
 			buttons := []telegram.Button{}
 			for _, b := range row {
