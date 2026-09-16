@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/EugenSleptsov/hoarder/internal/app"
+	"github.com/EugenSleptsov/hoarder/internal/dialog"
 	"github.com/EugenSleptsov/hoarder/internal/forecast"
 	"github.com/EugenSleptsov/hoarder/internal/item"
 	"github.com/EugenSleptsov/hoarder/internal/sqlstore"
@@ -154,6 +155,9 @@ func (s *Service) applyControl(ctx context.Context, tx *sqlstore.Tx, state item.
 	if _, err := state.Apply(event); err != nil {
 		return "Действие больше недоступно. Откройте /manage.", nil
 	}
+	if a.Control == item.Reconfigure && *a.Configuration == state.Config {
+		return "Настройки не изменились.", s.managementCard(ctx, tx, state, messageID, now)
+	}
 	next, err := tx.ApplyEvent(ctx, event, state.Revision)
 	if err != nil {
 		return "", err
@@ -174,6 +178,11 @@ func (s *Service) applyControl(ctx context.Context, tx *sqlstore.Tx, state item.
 	}
 	if err = tx.SaveQuestion(ctx, plan); err != nil {
 		return "", err
+	}
+	if a.Control == item.Reconfigure || a.Control == item.Resume {
+		if _, err = s.updateIntent(ctx, tx, next, now); err != nil {
+			return "", err
+		}
 	}
 	if err = s.invalidateQuestion(ctx, tx, state.Config.ID); err != nil {
 		return "", err
@@ -231,7 +240,7 @@ func (s *Service) refreshPending(ctx context.Context, tx *sqlstore.Tx, v *screen
 		if err != nil {
 			return false, err
 		}
-		if current.Archived || current.Revision != v.Dialog.ItemRevision && v.Dialog.Step != "done" {
+		if current.Archived || current.Revision != v.Dialog.ItemRevision && v.Dialog.Step != dialog.Done {
 			v.Used = true
 			return true, tx.Put(ctx, "screen", v.ID, v)
 		}

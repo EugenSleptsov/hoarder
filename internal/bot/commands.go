@@ -66,7 +66,11 @@ func (s *Service) command(ctx context.Context, tx *sqlstore.Tx, text string, now
 	}
 	for _, existing := range items {
 		if strings.EqualFold(existing.Config.Name, name) {
-			return s.note(ctx, tx, "Предмет с таким названием уже есть. Откройте /items.", nil, 0, now)
+			destination := "/items"
+			if existing.Archived {
+				destination = "/archive"
+			}
+			return s.note(ctx, tx, "Предмет с таким названием уже есть. Откройте "+destination+".", nil, 0, now)
 		}
 	}
 	id, e := opaqueID()
@@ -167,23 +171,15 @@ func (s *Service) finish(ctx context.Context, tx *sqlstore.Tx, v *screen, now ti
 		v.Text += "\nСледующий опрос: " + plan.LocalDate + " (" + s.cfg.Zone + ")."
 	}
 	if !d.Unknown {
-		decision, err := (forecast.Baseline{}).Predict(state, now)
+		needed, err := s.updateIntent(ctx, tx, state, now)
 		if err != nil {
 			return err
 		}
-		needed := decision.Stock.Mid() <= state.Config.ReserveUnits || decision.PossibleShortageBeforePurchase
-		if needed {
-			var prior intent
-			err = tx.Get(ctx, "intent", state.Config.ID, &prior)
-			if errors.Is(err, sqlstore.ErrNotFound) {
-				err = tx.Insert(ctx, "intent", state.Config.ID, intent{state.Config.ID, now})
-			}
-			if err != nil {
-				return err
-			}
+		if needed && !state.Paused {
 			v.Text += "\nДобавлено в список покупок. Это рекомендация, а не заказ."
-		} else if err = tx.Delete(ctx, "intent", state.Config.ID); err != nil {
-			return err
+		}
+		if needed && state.Paused {
+			v.Text += "\nРекомендация пополнить сохранена, но скрыта из списка покупок на время паузы."
 		}
 	}
 	return nil

@@ -34,14 +34,17 @@ type Service struct {
 }
 
 type action struct {
-	Bound                    bool
-	ExpectedRevision         uint64
-	Control                  item.Kind
-	Field                    string
-	Configuration            *item.Config
-	Label, Kind, ItemID, View string
-	Page                     int
-	IDs                      []string
+	Bound            bool
+	ExpectedRevision uint64
+	Control          item.Kind
+	Field            string
+	Configuration    *item.Config
+	Label            string
+	Kind             string
+	ItemID           string
+	View             string
+	Page             int
+	IDs              []string
 }
 
 type screen struct {
