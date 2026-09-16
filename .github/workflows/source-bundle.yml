@@ -7,9 +7,15 @@ on:
       - '.github/workflows/source-bundle.yml'
       - 'go.mod'
       - 'go.sum'
+      - 'cmd/**'
+      - 'internal/**'
 
 permissions:
   contents: read
+
+concurrency:
+  group: source-bundle-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   bundle:
