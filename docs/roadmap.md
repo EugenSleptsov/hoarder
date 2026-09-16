@@ -12,7 +12,7 @@ SQLite persists original item states, immutable events, projections, revisions a
 
 The physical tables are `metadata`, `items`, `events` and generic typed-JSON `records`. Plans, screens, sessions, intents, jobs and runtime receipts use `records`; conceptual tables in the original architecture are not all separate SQL tables. Workflow relations are transactionally checked by the service.
 
-Schema v2 adds a reader compatibility fence for lifecycle/configuration events. Owner-checked v1 migration preserves historical payloads and receipt hashes; prior binaries must refuse v2. Normalization, indexes, retention and larger migration fixtures remain future work.
+Schema v3 adds a reader compatibility fence for lifecycle/configuration events, quick onboarding, adding queues and markup-only delivery. Owner-checked v1/v2 migration preserves historical payloads and receipt hashes; prior binaries must refuse v3. Normalization, indexes, retention and larger migration fixtures remain future work.
 
 ## H002 — Independent plans and lifecycle: implemented initial slice
 
@@ -30,9 +30,15 @@ Pending proactive menus are checked again before delivery. Paused/archived/no-lo
 
 Pending: interprocess leases, durable bot-wide flood-limit cooldown, failed-job inspection/retry controls, retention and broader crash injection. Deploy one process per token/database.
 
+## Callback cleanup and quick adding — implemented
+
+Terminal stock/onboarding/cancel answers now leave keyboard-free receipts. Intermediate steps replace buttons. Superseded questions queue markup-only cleanup; per-message screen ownership prevents stale taps from erasing current keyboards. Tests cover restart, legacy messages and late HTTP success/failure racing new callbacks.
+
+Quick onboarding offers name shortcuts, reserve, stock presets and explicit confirmation; duration is optional and its default disclosed. Multi-line lists up to 20 names are validated/deduplicated and confirmed per item. `/add` resumes; `/cancel` abandons the remaining queue. Old wizards remain readable. See [callback-onboarding.md](callback-onboarding.md).
+
 ## H004 — Callback conversations: implemented for one owner
 
-Onboarding uses text for the name and buttons for reserve, duration hint, closed packages and open-package level. Existing checks distinguish unknown, confirmed household non-use and purchase-history clarification. Unknown-time purchases cause current snapshots rather than fake additions. Partial checks expire after 15 minutes rather than silently mixing old and new quantities.
+Onboarding uses name shortcuts or text, inline reserve and stock choices, optional duration and explicit confirmation. Existing checks distinguish unknown, confirmed household non-use and purchase-history clarification. Unknown-time purchases cause current snapshots rather than fake additions. Partial checks expire after 15 minutes rather than silently mixing old and new quantities.
 
 Management uses `/manage` and `/archive` plus inline controls. Settings preview old/new values and archive has a confirmation step. Expected item revisions protect both stock observations and management actions. Callback/update receipts and polling offset persist with durable decisions. Tests cover repeated, stale, concurrent and unauthorised callbacks, restart, failed edits and message-scope checks.
 

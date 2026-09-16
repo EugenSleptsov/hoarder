@@ -1,46 +1,41 @@
 # Verification record
 
-Recorded: 2026-09-16. Results apply to exact code snapshots, not automatically to later changes. Documentation-only commits do not add runtime behavior.
+Recorded: 2026-09-16. Verified code snapshot: `4a2988e4da45a458e8eaea391071fcc8c7a7b8b4`, tree `07fcb2630ef214165aa4bd49493a29b3b4a61f46`. Documentation-only changes after this snapshot do not add runtime behavior.
 
-## Item management and callback runtime
+## Callback cleanup and convenient adding
 
-Verified code snapshot: `eba0a7764455b1d688d98ac7e45131aae0d11459`.
+[Go checks, run 35061079358](https://github.com/EugenSleptsov/hoarder/actions/runs/35061079358), job `104681334943`, completed successfully for that code snapshot. The job passed dependency verification, unchanged lock files, formatting, vet/race tests, named-test listing, runnable-bot build/help and offline simulation. CI configures Ubuntu 24.04 / Linux amd64, Go 1.27.1 and CGO.
 
-[Go checks, run 35057544409](https://github.com/EugenSleptsov/hoarder/actions/runs/35057544409), job `104670755351`, completed successfully. Environment: GitHub-hosted Ubuntu 24.04 / Linux amd64, Go 1.27.1, CGO enabled.
+Local execution: Linux amd64, Go 1.23.2 with `GOTOOLCHAIN=local`, GCC/CGO and offline vendored dependencies from the checksum-verified source bundle. The tested Git tree was compared byte-for-byte by its Git tree hash with the uploaded code tree. Vendor copies, binaries and test databases were not committed. This is a compatibility-test environment, not a production toolchain recommendation.
 
-The job passed module download/integrity and unchanged-lock-file checks, formatting, `go vet`, race tests with coverage, named-test listing, executable build/help and the offline simulation.
-
-## Local execution of the same code
-
-Environment: Linux amd64, Go 1.23.2 with `GOTOOLCHAIN=local`, GCC and the pinned SQLite dependency vendored from the checksum-verified source-bundle workflow. This is an offline compatibility test environment, not a recommended production toolchain. Vendored dependencies and local binaries were not committed.
-
-| Check | Result |
+| Local check | Result |
 |---|---|
 | `gofmt -l cmd internal` | No unformatted project files |
 | `go vet ./...` | Passed |
 | `go test -race -count=1 -cover -timeout=45s ./...` | Passed, all ten packages |
-| `go test -list='^(Test\|Fuzz)' ./...` | 77 named test functions, two fuzz targets |
-| `go build -o bin/hoarder ./cmd/hoarder` and `-h` | Passed |
+| `go test -list='^(Test\|Fuzz)' ./...` | 104 named tests and two fuzz targets |
+| `go build -o bin/hoarder ./cmd/hoarder`; `-h` | Passed |
 | `go run ./cmd/hoarder-sim` | Passed |
-| `FuzzParse`, 2 seconds / two workers | Passed, 114,334 executions in this run |
-| `FuzzIntervalValidation`, 2 seconds / two workers | Passed, 115,907 executions in this run |
+| `FuzzParse`, two seconds / two workers | Passed, 38,876 executions in this run |
+| `FuzzIntervalValidation`, two seconds / two workers | Passed, 60,175 executions in this run |
 
-The suite grew from 61 to 77 named tests in this slice. Fuzz counts describe brief smoke tests, not exhaustive validation.
+The suite grew from 77 to 104 named tests in this slice. Fuzz runs are brief smoke tests, not exhaustive proofs. Coverage includes bot 79.8%, dialog 72.8%, Telegram adapter 72.2%, SQLite 66.5%; those are executed statements, not forecast accuracy or complete failure-mode coverage.
 
-Local statement coverage: `internal/bot` 79.7%, `internal/item` 81.1%, `internal/sqlstore` 66.5%, `internal/dialog` 78.0%, `internal/forecast` 95.2%, `internal/schedule` 90.5%, `internal/app` 71.4%, `internal/telegram` 69.5%, `cmd/hoarder` 35.8%, `cmd/hoarder-sim` 68.6%. These are executed-statement percentages, not forecast accuracy or complete failure-mode coverage.
+## New regression scenarios
 
-## Added regression scenarios
+- Explicit empty `inline_keyboard` and markup-only removal with no text field; not-modified reconciliation and API errors.
+- Terminal/cancel receipts without buttons; intermediate steps keeping current buttons.
+- Superseded messages cleaned without erasing replacements in the same or another message.
+- Expired cleanup surviving network failure and database reopening.
+- Failed in-flight edits not deleting delivery of a newer committed receipt; in-flight cleanup followed by current-screen reconciliation.
+- Legacy screens without a message ledger not erasing newer keyboards; foreign callbacks cannot trigger cleanup.
+- A completed repeated tap repairing receipt text without creating another item or observation.
+- Three-tap common onboarding after name selection, explicit confirmation, optional duration, review/back, default-prior disclosure, and reserve policy independent of physical stock.
+- Multiline validation/deduplication, confirmation-time name conflict, cancellation of one/all remaining items and resume after restart.
+- Late confirmation requiring a fresh physical answer; old persisted onboarding remaining readable.
+- v1/v2 migration to v3 preserving event/receipt/dialog bytes; another item's state and plan remaining unchanged.
 
-- Pause/resume preserving physical evidence, rate, samples and the original possibly overdue plan date; another item's state and date remain identical.
-- Archival requiring confirmation, cancellation leaving the item unchanged, restoration onto pause and manual stock checks not implicitly resuming notifications.
-- Old observations and configuration confirmations rejected after newer item changes; competing confirmations applying only once; wrong sender rejected.
-- Reserve/lead-time/check-gap edits requiring confirmation, replaying after restart and never adding physical stock. Identical settings leave revision and plan unchanged.
-- Shopping recommendations being reconciled when reserve policy changes, without recording a purchase or fabricating consumption evidence.
-- A pending proactive digest being cancelled after its last item is paused; filtering one item while still delivering the other without moving that other's plan.
-- Control/event/plan/outbox rollback on injected transaction failure.
-- Migration from schema v1 to v2 preserving legacy event bytes and duplicate receipt hashes, refusing a different owner and replaying mixed legacy/control events.
-
-Existing integration tests continue to exercise inline onboarding, continuation after restart, callback acknowledgments, failed edits, unknown observations, no-use, hidden purchases, daily sessions, pagination, delivery windows, expired buttons and message ownership. SQLite tests use real temporary databases; Telegram tests use the real client against a local fake HTTP server. No live messages are sent.
+Three new adversarial regressions initially failed: late failed edit deleting a newer receipt, stale legacy keyboard cleanup erasing a replacement, and duplicate completed taps losing receipt text. The verified snapshot includes their fixes; initial failures are not reported as successes.
 
 ## Earlier verified snapshots
 
@@ -52,6 +47,6 @@ An intermediate management commit failed CI formatting in `internal/bot/service.
 
 ## Not performed or guaranteed
 
-No owner token, live Telegram connection, production deployment or household pilot was used. There is no demonstrated forecast-accuracy advantage over simple reminders. Annual seasonality, calibrated stockout probabilities, multiple users/groups, health endpoints, interprocess leases and automatic backup/record retention remain unimplemented.
+No owner token, live Telegram connection, production deployment or household pilot was used. HTTP tests assert real request shapes against a local fake server, not Telegram's live visual rendering. There is no demonstrated forecast-accuracy advantage over simple reminders. Annual seasonality, calibrated probabilities, multiple users/groups, interprocess leases and automatic backup/record retention remain unimplemented.
 
-First-send acceptance before local message-ID persistence can duplicate an external message. A network request already in flight cannot be atomically cancelled by pausing an item. Tests cover idempotent state mutation and selected recovery paths, not exactly-once external delivery, every power-loss boundary or arbitrary concurrent processes. Deploy one process per token/database.
+Keyboard removal can be delayed by a network failure or prevented by permanent Telegram errors. An already in-flight operation may appear briefly before reconciliation. First sends can duplicate across the send/commit crash window. Tests cover selected races and durable/idempotent application state, not exactly-once external delivery or arbitrary concurrent processes. Deploy one process per token/database.
