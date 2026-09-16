@@ -1,0 +1,254 @@
+[
+  {
+    "id": "M01",
+    "title": "Accept callbacks from a foreign sender",
+    "path": "internal/bot/service.go",
+    "before": "cb.From.ID != s.db.Owner() || ",
+    "after": "",
+    "required": true,
+    "witness": "TestDuplicateStaleAndUnauthorisedButtons"
+  },
+  {
+    "id": "M02",
+    "title": "Accept callbacks from a different message",
+    "path": "internal/bot/service.go",
+    "before": "if v.MessageID != 0 && v.MessageID != cb.Message.ID {",
+    "after": "if false && v.MessageID != 0 && v.MessageID != cb.Message.ID {",
+    "required": true,
+    "witness": "TestCallbackMessageScopeAndAccessibility"
+  },
+  {
+    "id": "M03",
+    "title": "Accept stale wizard generations",
+    "path": "internal/dialog/dialog.go",
+    "before": "generation != s.Generation",
+    "after": "false",
+    "required": true,
+    "witness": "TestStaleForbiddenAndMalformed"
+  },
+  {
+    "id": "M04",
+    "title": "Accept actions never offered by the wizard",
+    "path": "internal/dialog/dialog.go",
+    "before": "if !allowed {",
+    "after": "if false && !allowed {",
+    "required": true,
+    "witness": "TestStaleForbiddenAndMalformed"
+  },
+  {
+    "id": "M05",
+    "title": "Silently skip keyboard-only removal",
+    "path": "internal/telegram/keyboard.go",
+    "before": "var result Message",
+    "after": "return nil\n\tvar result Message",
+    "required": true,
+    "witness": "TestSupersededQuestionClearsOldMessageButNotNew"
+  },
+  {
+    "id": "M06",
+    "title": "Serialize terminal keyboard as null instead of empty array",
+    "path": "internal/bot/menu.go",
+    "before": "rows := [][]telegram.Button{}",
+    "after": "var rows [][]telegram.Button",
+    "required": true,
+    "witness": "TestDaemonAcknowledgesCallbacksAfterDurableDecision"
+  },
+  {
+    "id": "M07",
+    "title": "Treat unknown answer as fresh physical observation",
+    "path": "internal/item/item.go",
+    "before": "n.LastNote = \"no_stock_evidence\"",
+    "after": "n.Anchor = Anchor{n.Stock, e.At}\n\t\tn.LastNote = \"no_stock_evidence\"",
+    "required": true,
+    "witness": "TestUnknownDoesNotStopConsumption"
+  },
+  {
+    "id": "M08",
+    "title": "Reset stock on purchase instead of adding",
+    "path": "internal/item/item.go",
+    "before": "n.Stock.Low += e.Quantity.Low\n\t\tn.Stock.High += e.Quantity.High",
+    "after": "n.Stock.Low = e.Quantity.Low\n\t\tn.Stock.High = e.Quantity.High",
+    "required": true,
+    "witness": "TestAdditionIsNotResetAndIsIdempotent"
+  },
+  {
+    "id": "M09",
+    "title": "Learn consumption through unknown purchase history",
+    "path": "internal/item/item.go",
+    "before": "if e.HistoryComplete && s.Added == 0",
+    "after": "if s.Added == 0",
+    "required": true,
+    "witness": "TestUnreportedPurchaseReanchorsWithoutLearning"
+  },
+  {
+    "id": "M10",
+    "title": "Train lower rate bound from optimistic wrong endpoint",
+    "path": "internal/item/item.go",
+    "before": "(1-alpha)*s.Rate.Low + alpha*lo",
+    "after": "(1-alpha)*s.Rate.Low + alpha*hi + 0*lo",
+    "required": true,
+    "witness": "TestSnapshotRateUsesBothIntervalEndpoints"
+  },
+  {
+    "id": "M11",
+    "title": "Train upper rate bound from wrong endpoint",
+    "path": "internal/item/item.go",
+    "before": "(1-alpha)*s.Rate.High+alpha*hi",
+    "after": "(1-alpha)*s.Rate.High+alpha*lo+0*hi",
+    "required": true,
+    "witness": "TestSnapshotRateUsesBothIntervalEndpoints"
+  },
+  {
+    "id": "M12",
+    "title": "Estimate exhaustion from upper stock bound",
+    "path": "internal/forecast/baseline.go",
+    "before": "s.Stock.Low/s.Rate.High-s.Config.LeadDays",
+    "after": "s.Stock.High/s.Rate.High-s.Config.LeadDays",
+    "required": true,
+    "witness": "TestSafetyDeadlineUsesLowerStockAndUpperRate"
+  },
+  {
+    "id": "M13",
+    "title": "Misclassify replenishment as ordinary stock check",
+    "path": "internal/forecast/baseline.go",
+    "before": "d.Action = CheckReplenishment",
+    "after": "d.Action = CheckStock",
+    "required": true,
+    "witness": "TestDecisionActionDistinguishesWaitCheckAndReplenishment"
+  },
+  {
+    "id": "M14",
+    "title": "Slide observation-gap deadline on every tick",
+    "path": "internal/forecast/baseline.go",
+    "before": "due := s.Anchor.At.Add(days(s.Config.MaxCheckDays))",
+    "after": "due := now.Add(days(s.Config.MaxCheckDays))",
+    "required": true,
+    "witness": "TestUnknownCannotResetMaximumObservationGap"
+  },
+  {
+    "id": "M15",
+    "title": "Offer future planned items as due",
+    "path": "internal/bot/delivery.go",
+    "before": "if p.SendAt.After(now) {",
+    "after": "if false && p.SendAt.After(now) {",
+    "required": true,
+    "witness": "TestFuturePlansAreNotDueUntilTheirStoredSlot"
+  },
+  {
+    "id": "M16",
+    "title": "Introduce cross-item cap of eight questions",
+    "path": "internal/bot/delivery.go",
+    "before": "ids = append(ids, state.Config.ID)",
+    "after": "ids = append(ids, state.Config.ID)\n\t\tif len(ids) >= 8 { return ids, nil }",
+    "required": true,
+    "witness": "TestDailyDigestIncludesAllItemsWithoutMovingTheirPlans"
+  },
+  {
+    "id": "M17",
+    "title": "Commit partial changes despite transaction error",
+    "path": "internal/sqlstore/database.go",
+    "before": "if err = fn(&Tx{tx: tx, owner: s.owner}); err != nil {\n\t\treturn err",
+    "after": "if err = fn(&Tx{tx: tx, owner: s.owner}); err != nil {\n\t\t_ = tx.Commit()\n\t\treturn err",
+    "required": true,
+    "witness": "TestRollbackAndReplay"
+  },
+  {
+    "id": "M18",
+    "title": "Save projection but omit original event",
+    "path": "internal/sqlstore/items.go",
+    "before": "if err = t.AppendEvent(ctx, e); err != nil {",
+    "after": "if false {",
+    "required": true,
+    "witness": "TestRollbackAndReplay"
+  },
+  {
+    "id": "M19",
+    "title": "Disable SQLite foreign-key integrity",
+    "path": "internal/sqlstore/database.go",
+    "before": "q.Set(\"_foreign_keys\", \"on\")",
+    "after": "q.Set(\"_foreign_keys\", \"off\")",
+    "required": true,
+    "witness": "TestForeignKeyRejectsOrphanEvent"
+  },
+  {
+    "id": "M20",
+    "title": "Replay with unsupported model version",
+    "path": "internal/sqlstore/items.go",
+    "before": "if version != forecast.Version {",
+    "after": "if false && version != forecast.Version {",
+    "required": true,
+    "witness": "TestReplayRefusesUnsupportedModelVersion"
+  },
+  {
+    "id": "M21",
+    "title": "Remove callback acknowledgement from real daemon",
+    "path": "cmd/hoarder/main.go",
+    "before": "ackErr := api.AnswerNotice(ackCtx, u.Callback.ID, notice)",
+    "after": "var ackErr error\n\t\t\t\t_ = ackCtx\n\t\t\t\t_ = notice",
+    "required": true,
+    "witness": "TestDaemonAcknowledgesCallbacksAfterDurableDecision"
+  },
+  {
+    "id": "M22",
+    "title": "Accept no-use without confirmed history",
+    "path": "internal/item/item.go",
+    "before": "if !e.From.Equal(s.AsOf) || !e.HistoryComplete || e.Quantity != (Interval{}) {",
+    "after": "if !e.From.Equal(s.AsOf) || e.Quantity != (Interval{}) {",
+    "required": true,
+    "witness": "TestNoUseRejectsUnconfirmedHistoryWithoutMutation"
+  },
+  {
+    "id": "M23",
+    "title": "Forget bot-wide flood cooldown",
+    "path": "internal/bot/delivery.go",
+    "before": "if until.After(now) {",
+    "after": "if false && until.After(now) {",
+    "required": true,
+    "witness": "TestAdversarialFloodCooldownCoversOtherJobsAndRestart"
+  },
+  {
+    "id": "M24",
+    "title": "Use final reply time instead of physical check time",
+    "path": "internal/bot/commands.go",
+    "before": "At: d.ObservedAt, Quantity:",
+    "after": "At: now, Quantity:",
+    "required": true,
+    "witness": "TestDelayedHistoryKeepsPhysicalObservationTime"
+  },
+  {
+    "id": "M25",
+    "title": "Map half-full preset to three-quarters",
+    "path": "internal/dialog/onboarding.go",
+    "before": "\"qhalf\": {.375, .625}",
+    "after": "\"qhalf\": {.625, .875}",
+    "required": true,
+    "witness": "TestEveryStockPresetHasCorrectQuantityIndependentOfPolicy"
+  },
+  {
+    "id": "M26",
+    "title": "Allow stale stock at final onboarding confirmation",
+    "path": "internal/dialog/onboarding.go",
+    "before": "now.Sub(s.ObservedAt) > 15*time.Minute",
+    "after": "now.Sub(s.ObservedAt) > 365*24*time.Hour",
+    "required": true,
+    "witness": "TestQuickConfirmationCannotRefreshOldObservation"
+  },
+  {
+    "id": "M27",
+    "title": "Restore archived item with notifications enabled",
+    "path": "internal/item/controls.go",
+    "before": "n.Archived, n.Paused = false, true",
+    "after": "n.Archived, n.Paused = false, false",
+    "required": true,
+    "witness": "TestControlsDoNotBecomePhysicalEvidence"
+  },
+  {
+    "id": "M28",
+    "title": "Remove lead time from redundant ordinary deadline only",
+    "path": "internal/forecast/baseline.go",
+    "before": "s.Stock.Mid()/s.Rate.Mid()-s.Config.LeadDays",
+    "after": "s.Stock.Mid()/s.Rate.Mid()",
+    "required": false,
+    "rationale": "Diagnostic probe, not a required kill: the independent safety deadline still subtracts lead time and is never later than the ordinary no-reserve deadline. Dates/actions/stock remain unchanged; only the reason tie-break can change. This is NOT claimed to be fully equivalent. It survived both runs and is retained in the report rather than silently excluded."
+  }
+]

@@ -13,7 +13,7 @@ import (
 
 func assertNoKeyboard(t *testing.T, msg telegram.Text) {
 	t.Helper()
-	if msg.Keyboard == nil || len(msg.Keyboard.Rows) != 0 {
+	if msg.Keyboard == nil || msg.Keyboard.Rows == nil || len(msg.Keyboard.Rows) != 0 {
 		t.Fatalf("keyboard was not explicitly removed: %+v", msg)
 	}
 }
