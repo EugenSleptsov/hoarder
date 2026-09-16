@@ -1,54 +1,57 @@
 # Verification record
 
-Recorded: 2026-09-15. Results apply to the exact snapshots below, not automatically to later commits. Current branch status is also visible in GitHub Actions.
+Recorded: 2026-09-16. Results apply to exact code snapshots, not automatically to later changes. Documentation-only commits do not add runtime behavior.
 
-## Runnable callback runtime
+## Item management and callback runtime
 
-Verified code snapshot: `eeb8f5c0890a512504a4987137297a07d8d6750c`.
+Verified code snapshot: `eba0a7764455b1d688d98ac7e45131aae0d11459`.
 
-[Go checks, run 35030465652](https://github.com/EugenSleptsov/hoarder/actions/runs/35030465652), job `104587519706`, completed successfully. Environment: GitHub-hosted Ubuntu 24.04, Linux amd64, Go 1.27.1, CGO enabled and GCC available.
+[Go checks, run 35057544409](https://github.com/EugenSleptsov/hoarder/actions/runs/35057544409), job `104670755351`, completed successfully. Environment: GitHub-hosted Ubuntu 24.04 / Linux amd64, Go 1.27.1, CGO enabled.
 
-| Check | Result at this snapshot |
+The job passed module download/integrity and unchanged-lock-file checks, formatting, `go vet`, race tests with coverage, named-test listing, executable build/help and the offline simulation.
+
+## Local execution of the same code
+
+Environment: Linux amd64, Go 1.23.2 with `GOTOOLCHAIN=local`, GCC and the pinned SQLite dependency vendored from the checksum-verified source-bundle workflow. This is an offline compatibility test environment, not a recommended production toolchain. Vendored dependencies and local binaries were not committed.
+
+| Check | Result |
 |---|---|
-| `gofmt` check | Passed |
+| `gofmt -l cmd internal` | No unformatted project files |
 | `go vet ./...` | Passed |
-| `go test -race -count=1 -cover ./...` | Passed |
+| `go test -race -count=1 -cover -timeout=45s ./...` | Passed, all ten packages |
+| `go test -list='^(Test\|Fuzz)' ./...` | 77 named test functions, two fuzz targets |
+| `go build -o bin/hoarder ./cmd/hoarder` and `-h` | Passed |
 | `go run ./cmd/hoarder-sim` | Passed |
-| Pinned SQLite module download/checksum verification | Passed |
+| `FuzzParse`, 2 seconds / two workers | Passed, 114,334 executions in this run |
+| `FuzzIntervalValidation`, 2 seconds / two workers | Passed, 115,907 executions in this run |
 
-The runtime integration tests use an injected HTTP transport into the real Telegram client, a local fake Telegram server, temporary real SQLite databases and controlled timestamps. They do not contact Telegram.
+The suite grew from 61 to 77 named tests in this slice. Fuzz counts describe brief smoke tests, not exhaustive validation.
 
-Verified scenarios include:
+Local statement coverage: `internal/bot` 79.7%, `internal/item` 81.1%, `internal/sqlstore` 66.5%, `internal/dialog` 78.0%, `internal/forecast` 95.2%, `internal/schedule` 90.5%, `internal/app` 71.4%, `internal/telegram` 69.5%, `cmd/hoarder` 35.8%, `cmd/hoarder-sim` 68.6%. These are executed-statement percentages, not forecast accuracy or complete failure-mode coverage.
 
-- Adding an item with inline callback buttons, restarting between dialog steps and completing the same persisted dialog.
-- Sending `answerCallbackQuery` and editing the existing Telegram message rather than asking for typed percentage commands.
-- Duplicate update, same callback in a new update, stale screen generation, wrong sender and expired screen rejection without another inventory mutation.
-- Unknown observations continuing the forecast while preserving the physical-observation anchor and another item's state/plan.
-- "Already bought" re-anchoring the current snapshot rather than inventing an addition or training through unknown purchase history.
-- Explicit no-use confirmation preserving stock without setting future consumption to zero.
-- One daily session containing ten independently due items across pages, without duplicate creation on restart.
-- Failed proactive delivery not being retried outside the configured daily window, with due items retained for the next day.
-- Empty-day silence and recovery of an accepted first-send message ID through an authorised callback.
-- Stored schedule changes being rejected rather than silently moving existing item deadlines.
+## Added regression scenarios
 
-SQLite tests additionally cover event/projection/receipt rollback, exact duplicate and conflicting command IDs, concurrent optimistic revisions, reopen and replay, immutable events, transactional polling offset, schema/owner checks and consistent backup/restore.
+- Pause/resume preserving physical evidence, rate, samples and the original possibly overdue plan date; another item's state and date remain identical.
+- Archival requiring confirmation, cancellation leaving the item unchanged, restoration onto pause and manual stock checks not implicitly resuming notifications.
+- Old observations and configuration confirmations rejected after newer item changes; competing confirmations applying only once; wrong sender rejected.
+- Reserve/lead-time/check-gap edits requiring confirmation, replaying after restart and never adding physical stock. Identical settings leave revision and plan unchanged.
+- Shopping recommendations being reconciled when reserve policy changes, without recording a purchase or fabricating consumption evidence.
+- A pending proactive digest being cancelled after its last item is paused; filtering one item while still delivering the other without moving that other's plan.
+- Control/event/plan/outbox rollback on injected transaction failure.
+- Migration from schema v1 to v2 preserving legacy event bytes and duplicate receipt hashes, refusing a different owner and replaying mixed legacy/control events.
 
-Three additional regression tests were added in `0aca387c560f95483aa36a4556af5f68031b944b`: concurrent competing callbacks, accepted observations across failed edits/restart, and callback message-scope/accessibility failures. Their result must be read from a subsequent CI run; it is not implied by the earlier run above.
+Existing integration tests continue to exercise inline onboarding, continuation after restart, callback acknowledgments, failed edits, unknown observations, no-use, hidden purchases, daily sessions, pagination, delivery windows, expired buttons and message ownership. SQLite tests use real temporary databases; Telegram tests use the real client against a local fake HTTP server. No live messages are sent.
 
-The workflow was subsequently extended to verify module integrity and unchanged lock files, list named tests, explicitly build `cmd/hoarder` and run the executable's `-h` path. These additional steps likewise require a run containing that workflow revision.
+## Earlier verified snapshots
 
-## Local checks in the callback implementation session
+The previous runtime snapshot `99bf8c0466b6010c5e2d254581b25f7e01698d8c` passed [Go checks, run 35031295529](https://github.com/EugenSleptsov/hoarder/actions/runs/35031295529).
 
-Only the dependency-free dialog package was race-tested locally with Go 1.23.2; source files were formatted locally. Full database/bot tests were run on GitHub Actions, not claimed as local container execution. The local workspace did not have the downloaded SQLite dependency or a complete cloned source tree.
+The initial core `311155a92254887eb5c2b354ae4139c56899cfcb` passed local and [GitHub checks, run 35026271718](https://github.com/EugenSleptsov/hoarder/actions/runs/35026271718). It had 29 named tests and one fuzz target then; those counts are historical.
 
-## Historical initial core
+An intermediate management commit failed CI formatting in `internal/bot/service.go`. The verified snapshot above includes the correction and passed the complete job; failed intermediate runs are not treated as successful tests.
 
-The original snapshot `311155a92254887eb5c2b354ae4139c56899cfcb` passed local race tests, vet, formatting, the two-item simulation and a short interval-validation fuzz smoke test on Linux amd64 / Go 1.23.2. It contained 29 named test functions and one fuzz target at that time. [Initial Go checks, run 35026271718](https://github.com/EugenSleptsov/hoarder/actions/runs/35026271718) also passed on Go 1.27.1. These historical counts are not the current suite size.
+## Not performed or guaranteed
 
-Coverage describes exercised statements, not forecast accuracy or production readiness. Short fuzz runs and selected failure scenarios are not exhaustive proofs.
+No owner token, live Telegram connection, production deployment or household pilot was used. There is no demonstrated forecast-accuracy advantage over simple reminders. Annual seasonality, calibrated stockout probabilities, multiple users/groups, health endpoints, interprocess leases and automatic backup/record retention remain unimplemented.
 
-## Not performed / not guaranteed
-
-No live Telegram token, messages, production deployment or household pilot was used. There is no demonstrated accuracy benefit over simple reminders yet. Annual seasonality, calibrated stockout probabilities, multi-user/group support, health endpoints, worker leases and automatic backup/record retention are not implemented.
-
-The first external `sendMessage` may be duplicated if Telegram accepts it but the process crashes before the returned message ID is saved. Tests cover idempotent state mutation and selected recovery paths, not exactly-once external delivery or every operating-system/power-loss boundary. Runtime deployment is single-process per database/token.
+First-send acceptance before local message-ID persistence can duplicate an external message. A network request already in flight cannot be atomically cancelled by pausing an item. Tests cover idempotent state mutation and selected recovery paths, not exactly-once external delivery, every power-loss boundary or arbitrary concurrent processes. Deploy one process per token/database.
