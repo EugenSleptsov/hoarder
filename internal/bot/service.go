@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/EugenSleptsov/hoarder/internal/dialog"
+	"github.com/EugenSleptsov/hoarder/internal/item"
 	"github.com/EugenSleptsov/hoarder/internal/schedule"
 	"github.com/EugenSleptsov/hoarder/internal/sqlstore"
 	"github.com/EugenSleptsov/hoarder/internal/telegram"
@@ -33,12 +34,19 @@ type Service struct {
 }
 
 type action struct {
+	Bound                    bool
+	ExpectedRevision         uint64
+	Control                  item.Kind
+	Field                    string
+	Configuration            *item.Config
 	Label, Kind, ItemID, View string
-	Page                      int
-	IDs                       []string
+	Page                     int
+	IDs                      []string
 }
 
 type screen struct {
+	MenuView  string
+	MenuIDs   []string
 	ID        string
 	Dialog    *dialog.State
 	Text      string
@@ -191,7 +199,18 @@ func (s *Service) routeCallback(ctx context.Context, tx *sqlstore.Tx, cb telegra
 		}
 		a := v.Actions[n]
 		switch a.Kind {
+		case "manage", "settings", "setting", "config_preview", "archive_preview", "control":
+			return s.managementCallback(ctx, tx, a, v.ID, v.MessageID, now)
 		case "check", "bought":
+			if a.Bound {
+				current, err := tx.LoadItem(ctx, a.ItemID)
+				if err != nil {
+					return "", err
+				}
+				if current.Archived || current.Revision != a.ExpectedRevision {
+					return "Предмет изменён. Откройте /items.", nil
+				}
+			}
 			return "", s.beginCheck(ctx, tx, a.ItemID, a.Kind == "bought", v.MessageID, now)
 		case "page":
 			return "", s.menu(ctx, tx, a.View, a.Page, a.IDs, v.MessageID, now)
@@ -230,7 +249,7 @@ func (s *Service) routeCallback(ctx context.Context, tx *sqlstore.Tx, cb telegra
 		if err != nil {
 			return "", err
 		}
-		if current.Revision != d.ItemRevision {
+		if current.Archived || current.Revision != d.ItemRevision {
 			return "Остаток уже обновлён. Откройте /items.", nil
 		}
 	}

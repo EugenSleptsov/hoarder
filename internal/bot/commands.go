@@ -20,6 +20,12 @@ func (s *Service) command(ctx context.Context, tx *sqlstore.Tx, text string, now
 	if text == "/start" || text == "/items" {
 		return s.menu(ctx, tx, "all", 0, nil, 0, now)
 	}
+	if text == "/manage" {
+		return s.menu(ctx, tx, "manage", 0, nil, 0, now)
+	}
+	if text == "/archive" {
+		return s.menu(ctx, tx, "archive", 0, nil, 0, now)
+	}
 	if text == "/today" {
 		return s.menu(ctx, tx, "due", 0, nil, 0, now)
 	}
@@ -49,7 +55,7 @@ func (s *Service) command(ctx context.Context, tx *sqlstore.Tx, text string, now
 		return s.note(ctx, tx, "Введите название предмета одним сообщением.", []action{{Label: "Отмена", Kind: "cancel_add"}}, 0, now)
 	}
 	if name == "" {
-		return s.note(ctx, tx, "Команды: /items, /today, /shopping, /add. Ответы на вопросы — кнопками.", nil, 0, now)
+		return s.note(ctx, tx, "Команды: /items, /today, /shopping, /add, /manage, /archive. Ответы на вопросы — кнопками.", nil, 0, now)
 	}
 	if utf8.RuneCountInString(name) > 80 || strings.IndexFunc(name, unicode.IsControl) >= 0 {
 		return s.note(ctx, tx, "Название: одна строка, не более 80 символов.", nil, 0, now)
@@ -91,6 +97,9 @@ func (s *Service) beginCheck(ctx context.Context, tx *sqlstore.Tx, id string, bo
 	current, e := tx.LoadItem(ctx, id)
 	if e != nil {
 		return e
+	}
+	if current.Archived {
+		return s.note(ctx, tx, "Предмет в архиве. Восстановите его через /archive.", nil, messageID, now)
 	}
 	dialogID, e := opaqueID()
 	if e != nil {
@@ -152,7 +161,11 @@ func (s *Service) finish(ctx context.Context, tx *sqlstore.Tx, v *screen, now ti
 	if e = tx.SaveQuestion(ctx, plan); e != nil {
 		return e
 	}
-	v.Text += "\nСледующий опрос: " + plan.LocalDate + " (" + s.cfg.Zone + ")."
+	if state.Paused {
+		v.Text += "\nОпросы приостановлены. Остаток обновлён, но уведомления не включены."
+	} else {
+		v.Text += "\nСледующий опрос: " + plan.LocalDate + " (" + s.cfg.Zone + ")."
+	}
 	if !d.Unknown {
 		decision, err := (forecast.Baseline{}).Predict(state, now)
 		if err != nil {

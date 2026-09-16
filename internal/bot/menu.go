@@ -25,12 +25,23 @@ func (s *Service) menuScreen(ctx context.Context, tx *sqlstore.Tx, view string, 
 			return "", e
 		}
 	}
+	// A persisted page is a candidate list, never authority over current lifecycle.
+	ids, e = s.filterItems(ctx, tx, view, ids, now)
+	if e != nil {
+		return "", e
+	}
 	const pageSize = 8
 	pages := (len(ids) + pageSize - 1) / pageSize
 	if page < 0 || page >= pages {
 		page = 0
 	}
 	title := "Предметы"
+	if view == "manage" {
+		title = "Управление предметами"
+	}
+	if view == "archive" {
+		title = "Архив"
+	}
 	if view == "due" {
 		title = "Вопросы на сегодня"
 	}
@@ -52,7 +63,13 @@ func (s *Service) menuScreen(ctx context.Context, tx *sqlstore.Tx, view string, 
 			kind = "bought"
 			label = "Уже купили: " + label
 		}
-		actions = append(actions, action{Label: label, Kind: kind, ItemID: id})
+		if view == "manage" || view == "archive" || state.Paused {
+			kind = "manage"
+		}
+		if state.Paused && !state.Archived {
+			label += " (пауза)"
+		}
+		actions = append(actions, itemAction(label, kind, state))
 	}
 	if page > 0 {
 		actions = append(actions, action{Label: "Назад", Kind: "page", View: view, Page: page - 1, IDs: ids})
@@ -61,6 +78,12 @@ func (s *Service) menuScreen(ctx context.Context, tx *sqlstore.Tx, view string, 
 		actions = append(actions, action{Label: "Дальше", Kind: "page", View: view, Page: page + 1, IDs: ids})
 	}
 	actions = append(actions, action{Label: "Добавить предмет", Kind: "add"})
+	if view != "manage" {
+		actions = append(actions, action{Label: "Управление предметами", Kind: "view", View: "manage"})
+	}
+	if view == "manage" {
+		actions = append(actions, action{Label: "Архив", Kind: "view", View: "archive"})
+	}
 	if view != "due" {
 		actions = append(actions, action{Label: "Вопросы на сегодня", Kind: "view", View: "due"})
 	}
@@ -74,7 +97,7 @@ func (s *Service) menuScreen(ctx context.Context, tx *sqlstore.Tx, view string, 
 	if e != nil {
 		return "", e
 	}
-	v := screen{ID: id, Text: text, Actions: actions, MessageID: messageID, ExpiresAt: now.Add(7 * 24 * time.Hour)}
+	v := screen{MenuView: view, MenuIDs: ids, ID: id, Text: text, Actions: actions, MessageID: messageID, ExpiresAt: now.Add(7 * 24 * time.Hour)}
 	return id, tx.Insert(ctx, "screen", id, v)
 }
 

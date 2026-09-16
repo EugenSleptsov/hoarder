@@ -124,6 +124,13 @@ func (s *Service) Flush(ctx context.Context, api Messenger, now time.Time) error
 					skip = true
 				}
 			}
+			if !skip {
+				var err error
+				skip, err = s.refreshPending(ctx, tx, &v, job, now)
+				if err != nil {
+					return err
+				}
+			}
 			if skip {
 				return tx.Delete(ctx, "delivery", job.ScreenID)
 			}
@@ -207,8 +214,14 @@ func (s *Service) selectItems(ctx context.Context, tx *sqlstore.Tx, view string,
 	}
 	ids := []string{}
 	for _, state := range states {
+		if state.Archived != (view == "archive") {
+			continue
+		}
+		if state.Paused && (view == "due" || view == "shop") {
+			continue
+		}
 		switch view {
-		case "all":
+		case "all", "manage", "archive":
 		case "due":
 			var p app.QuestionPlan
 			if e = tx.Get(ctx, "plan", state.Config.ID, &p); e != nil {
