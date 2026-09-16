@@ -98,13 +98,24 @@ func (s *Service) Tick(ctx context.Context, now time.Time) error {
 // Telegram accepts it but the process crashes before MessageID is saved.
 // Call from one process per database; the mutex serialises this process's sender.
 func (s *Service) Flush(ctx context.Context, api Messenger, now time.Time) error {
-	if api == nil {
-		return errors.New("Telegram messenger required")
+	if api == nil || now.IsZero() {
+		return errors.New("Telegram messenger and time required")
 	}
 	s.delivery.Lock()
 	defer s.delivery.Unlock()
 	var jobs []json.RawMessage
-	e := s.db.Transaction(ctx, func(tx *sqlstore.Tx) error { var e error; jobs, e = tx.List(ctx, "delivery"); return e })
+	e := s.db.Transaction(ctx, func(tx *sqlstore.Tx) error {
+		var until time.Time
+		err := tx.Get(ctx, "runtime", "flood_until", &until)
+		if err != nil && !errors.Is(err, sqlstore.ErrNotFound) {
+			return err
+		}
+		if until.After(now) {
+			return nil
+		}
+		jobs, err = tx.List(ctx, "delivery")
+		return err
+	})
 	if e != nil {
 		return e
 	}
@@ -113,12 +124,23 @@ func (s *Service) Flush(ctx context.Context, api Messenger, now time.Time) error
 		if e = json.Unmarshal(raw, &job); e != nil {
 			return e
 		}
-		if job.NextAttempt.After(now) {
-			continue
-		}
 		var v screen
 		skip := false
 		e = s.db.Transaction(ctx, func(tx *sqlstore.Tx) error {
+			// The enumeration is only a list of candidates. Earlier network calls
+			// may have let callbacks replace, defer or delete this job.
+			err := tx.Get(ctx, "delivery", job.ScreenID, &job)
+			if errors.Is(err, sqlstore.ErrNotFound) {
+				skip = true
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			if job.NextAttempt.After(now) {
+				skip = true
+				return nil
+			}
 			e := tx.Get(ctx, "screen", job.ScreenID, &v)
 			if e != nil {
 				return e
@@ -184,6 +206,22 @@ func (s *Service) Flush(ctx context.Context, api Messenger, now time.Time) error
 			// An invalid/deleted message cannot be repaired by endless identical edits.
 			permanent := errors.As(e, &apiErr) && (apiErr.Code == 400 || apiErr.Code == 403)
 			saveErr := s.db.Transaction(ctx, func(tx *sqlstore.Tx) error {
+				// Flood control is transport-wide, including other jobs and restarts;
+				// it must survive even if this particular screen became obsolete.
+				if apiErr != nil && apiErr.Code == 429 {
+					until := job.NextAttempt
+					var previous time.Time
+					err := tx.Get(ctx, "runtime", "flood_until", &previous)
+					if err != nil && !errors.Is(err, sqlstore.ErrNotFound) {
+						return err
+					}
+					if previous.After(until) {
+						until = previous
+					}
+					if err = tx.Put(ctx, "runtime", "flood_until", until); err != nil {
+						return err
+					}
+				}
 				// An older HTTP request must not overwrite/delete a delivery
 				// queued by a callback while that request was in flight.
 				var latest screen
