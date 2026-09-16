@@ -19,7 +19,7 @@ func TestFuturePlansAreNotDueUntilTheirStoredSlot(t *testing.T) {
 	if !strings.Contains(h.wire.snapshot().Text, "Вопросы на сегодня: 0") {
 		t.Fatal("future item shown as due", h.wire.snapshot().Text)
 	}
-	h.now = time.Date(2026, 9, 15, 19, 0, 0, 0, 0, time.UTC)
+	h.now = time.Date(2026, 9, 15, 19, 0, 0, 0, time.UTC)
 	sends := h.wire.sendCount()
 	if err := h.service.Tick(testContext, h.now); err != nil {
 		t.Fatal(err)
