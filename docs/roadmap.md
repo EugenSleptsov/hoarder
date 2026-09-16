@@ -28,7 +28,9 @@ Every eligible due item enters the daily session; pages do not defer items becau
 
 Pending proactive menus are checked again before delivery. Paused/archived/no-longer-due items are filtered; an empty digest is cancelled, a changed menu gets a new opaque screen ID. A request already in flight cannot be cancelled atomically. First-send acceptance before local message-ID persistence can still produce duplicates.
 
-Pending: interprocess leases, durable bot-wide flood-limit cooldown, failed-job inspection/retry controls, retention and broader crash injection. Deploy one process per token/database.
+The outgoing bot-wide flood-limit cooldown is now persisted and survives restart. Each delivery candidate is reloaded before sending, so stale enumeration cannot delete newer cleanup or retry jobs.
+
+Pending: interprocess leases, failed-job inspection/retry controls, retention and broader crash injection. Deploy one process per token/database.
 
 ## Callback cleanup and quick adding — implemented
 
@@ -43,6 +45,10 @@ Onboarding uses name shortcuts or text, inline reserve and stock choices, option
 Management uses `/manage` and `/archive` plus inline controls. Settings preview old/new values and archive has a confirmation step. Expected item revisions protect both stock observations and management actions. Callback/update receipts and polling offset persist with durable decisions. Tests cover repeated, stale, concurrent and unauthorised callbacks, restart, failed edits and message-scope checks.
 
 Pending: multiple household members/group chats, richer package quantities, corrections and interaction-burden metrics. Current input supports up to three closed packages and one open package and may require several taps; it is not zero-effort tracking.
+
+## Adversarial audit — implemented repairs
+
+The 2026-09-16 review reproduced and fixed six defects: foreign-message poison updates, idle-period polling offsets, oversized ordinary-text batches, stale delivery enumeration, restart-bypassed outgoing flood cooldown and malformed callback cleanup. Tests also cover receipt replay, deferred jobs and randomized onboarding sequences. See [adversarial-review.md](adversarial-review.md) for prerequisites and residual limits; no production-readiness claim follows from these repairs.
 
 ## H005 — Runnable process: implemented; operational hardening pending
 
