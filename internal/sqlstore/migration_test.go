@@ -31,7 +31,7 @@ func TestV1MigrationPreservesLegacyEventsAndReceipts(t *testing.T) {
 	}
 	defer db.Close()
 	var version int
-	if err = db.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil || version != 2 {
+	if err = db.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil || version != 3 {
 		t.Fatal(version, err)
 	}
 	var actual string
@@ -55,5 +55,30 @@ func TestV1MigrationPreservesLegacyEventsAndReceipts(t *testing.T) {
 		return err
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestV2MigrationPreservesPendingDialogBytes(t *testing.T) {
+	db, path, _ := fixture(t)
+	raw := `{"ID":"legacy-dialog","Dialog":{"step":"closed","creating":true},"Used":false}`
+	if _, err := db.db.ExecContext(ctx, "INSERT INTO records(kind,id,body) VALUES('screen','legacy-dialog',?)", raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.db.ExecContext(ctx, "PRAGMA user_version=2"); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	reopened, err := Open(ctx, path, 123)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	var version int
+	if err = reopened.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil || version != 3 {
+		t.Fatal(version, err)
+	}
+	var got string
+	if err = reopened.db.QueryRowContext(ctx, "SELECT body FROM records WHERE kind='screen' AND id='legacy-dialog'").Scan(&got); err != nil || got != raw {
+		t.Fatal("dialog history rewritten", err)
 	}
 }

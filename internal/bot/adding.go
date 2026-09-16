@@ -20,7 +20,6 @@ type addFlow struct {
 	ScreenID string
 	Names    []string
 	Index    int
-	Added    int
 }
 
 func loadAdding(ctx context.Context, tx *sqlstore.Tx) (addFlow, error) {
@@ -213,6 +212,14 @@ func (s *Service) resumeAdding(ctx context.Context, tx *sqlstore.Tx, f addFlow, 
 		return err
 	}
 	f.ScreenID = id
+	var v screen
+	if err = tx.Get(ctx, "screen", id, &v); err != nil {
+		return err
+	}
+	v.Text = old.Text
+	if err = tx.Put(ctx, "screen", id, v); err != nil {
+		return err
+	}
 	return tx.Put(ctx, "runtime", "adding", f)
 }
 
@@ -227,9 +234,6 @@ func (s *Service) advanceAdding(ctx context.Context, tx *sqlstore.Tx, v screen, 
 	if f.ScreenID != v.ID {
 		return nil
 	} // A persisted legacy wizard has no queue.
-	if !v.Dialog.Cancelled && !v.Used {
-		f.Added++
-	}
 	f.Index++
 	if f.Index >= len(f.Names) {
 		return tx.Delete(ctx, "runtime", "adding")

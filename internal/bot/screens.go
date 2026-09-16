@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"time"
@@ -21,7 +22,43 @@ func (s *Service) ownsMessage(ctx context.Context, tx *sqlstore.Tx, v screen) (b
 	var current string
 	err := tx.Get(ctx, "message_screen", messageKey(v.MessageID), &current)
 	if errors.Is(err, sqlstore.ErrNotFound) {
-		return true, nil
+		// Before message ledgers existed a used menu could share its message
+		// with a newer screen. Adopt only an unambiguous live successor.
+		rows, e := tx.List(ctx, "screen")
+		if e != nil {
+			return false, e
+		}
+		candidate := ""
+		for _, raw := range rows {
+			var other screen
+			if e = json.Unmarshal(raw, &other); e != nil {
+				return false, e
+			}
+			if other.MessageID != v.MessageID || other.Used {
+				continue
+			}
+			if other.Dialog != nil && other.Dialog.Step != "done" {
+				var active string
+				e = tx.Get(ctx, "active", other.Dialog.ItemID, &active)
+				if errors.Is(e, sqlstore.ErrNotFound) {
+					continue
+				}
+				if e != nil {
+					return false, e
+				}
+				if active != other.ID {
+					continue
+				}
+			}
+			if candidate != "" && candidate != other.ID {
+				return false, nil
+			}
+			candidate = other.ID
+		}
+		if candidate == "" {
+			return true, nil
+		}
+		return candidate == v.ID, tx.Put(ctx, "message_screen", messageKey(v.MessageID), candidate)
 	}
 	return current == v.ID, err
 }

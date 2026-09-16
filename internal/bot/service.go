@@ -248,6 +248,10 @@ func (s *Service) routeCallback(ctx context.Context, tx *sqlstore.Tx, cb telegra
 		return "Некорректная кнопка.", nil
 	}
 	d := *v.Dialog
+	if d.Step == dialog.Done {
+		// Replay the already committed receipt, never the domain transition.
+		return "Этот ответ уже сохранён.", s.queue(ctx, tx, v.ID, now, false, "")
+	}
 	var active string
 	if e = tx.Get(ctx, "active", d.ItemID, &active); errors.Is(e, sqlstore.ErrNotFound) {
 		return "Этот вопрос уже закрыт.", s.retireScreen(ctx, tx, v, now)

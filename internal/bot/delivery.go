@@ -184,6 +184,34 @@ func (s *Service) Flush(ctx context.Context, api Messenger, now time.Time) error
 			// An invalid/deleted message cannot be repaired by endless identical edits.
 			permanent := errors.As(e, &apiErr) && (apiErr.Code == 400 || apiErr.Code == 403)
 			saveErr := s.db.Transaction(ctx, func(tx *sqlstore.Tx) error {
+				// An older HTTP request must not overwrite/delete a delivery
+				// queued by a callback while that request was in flight.
+				var latest screen
+				if err := tx.Get(ctx, "screen", v.ID, &latest); err != nil {
+					return err
+				}
+				before, err := hash(v)
+				if err != nil {
+					return err
+				}
+				after, err := hash(latest)
+				if err != nil {
+					return err
+				}
+				if before != after {
+					return nil
+				}
+				var pending delivery
+				err = tx.Get(ctx, "delivery", job.ScreenID, &pending)
+				if errors.Is(err, sqlstore.ErrNotFound) {
+					return nil
+				}
+				if err != nil {
+					return err
+				}
+				if pending.ClearOnly != job.ClearOnly {
+					return nil
+				}
 				if permanent {
 					if err := tx.Put(ctx, "failed_delivery", job.ScreenID, job); err != nil {
 						return err
@@ -219,7 +247,10 @@ func (s *Service) Flush(ctx context.Context, api Messenger, now time.Time) error
 			}
 			if !current {
 				var currentID string
-				if err = tx.Get(ctx, "message_screen", messageKey(latest.MessageID), &currentID); err != nil {
+				if err = tx.Get(ctx, "message_screen", messageKey(latest.MessageID), &currentID); errors.Is(err, sqlstore.ErrNotFound) {
+					// Ambiguous legacy screens: do not guess a keyboard to restore.
+					return tx.Delete(ctx, "delivery", v.ID)
+				} else if err != nil {
 					return err
 				}
 				if err = s.queue(ctx, tx, currentID, now, false, ""); err != nil {
