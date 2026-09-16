@@ -106,47 +106,6 @@ func hash(v any) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-// Handle commits a durable decision before the polling cursor advances. It does
-// not make network calls. The caller acknowledges every callback after return.
-func (s *Service) Handle(ctx context.Context, u telegram.Update, now time.Time) (string, error) {
-	if now.IsZero() {
-		return "", errors.New("processing time required")
-	}
-	digest, e := hash(u)
-	if e != nil {
-		return "", e
-	}
-	notice := ""
-	e = s.db.Transaction(ctx, func(tx *sqlstore.Tx) error {
-		key := strconv.FormatInt(u.ID, 10)
-		var previous receipt
-		err := tx.Get(ctx, "update", key, &previous)
-		if err == nil {
-			if previous.Hash != digest {
-				return errors.New("update ID payload conflict")
-			}
-			notice = previous.Notice
-			return nil
-		}
-		if !errors.Is(err, sqlstore.ErrNotFound) {
-			return err
-		}
-		if u.Callback != nil {
-			notice, err = s.callback(ctx, tx, *u.Callback, now)
-		} else if u.Message != nil && u.Message.Chat.ID == s.db.Owner() && u.Message.Chat.Type == "private" {
-			err = s.command(ctx, tx, u.Message.Text, now)
-		}
-		if err != nil {
-			return err
-		}
-		if err = tx.Insert(ctx, "update", key, receipt{digest, notice}); err != nil {
-			return err
-		}
-		return tx.AdvanceOffset(ctx, u.ID)
-	})
-	return notice, e
-}
-
 func (s *Service) callback(ctx context.Context, tx *sqlstore.Tx, cb telegram.Callback, now time.Time) (string, error) {
 	if cb.ID == "" || cb.From.ID != s.db.Owner() || cb.Message == nil || cb.Message.ID <= 0 || cb.Message.Date == 0 || cb.Message.Chat.ID != s.db.Owner() || cb.Message.Chat.Type != "private" {
 		return "Нет доступа к этому вопросу.", nil
@@ -176,6 +135,25 @@ func (s *Service) callback(ctx context.Context, tx *sqlstore.Tx, cb telegram.Cal
 func (s *Service) routeCallback(ctx context.Context, tx *sqlstore.Tx, cb telegram.Callback, now time.Time) (string, error) {
 	parts := strings.Split(cb.Data, ":")
 	if len(cb.Data) > 64 || len(parts) < 3 {
+		return "Некорректная кнопка.", nil
+	}
+	// Reject malformed protocols before inspecting ownership/expiry; those
+	// checks may adopt a legacy binding or queue a real keyboard removal.
+	switch parts[0] {
+	case "m1":
+		if len(parts) != 3 {
+			return "Некорректная кнопка.", nil
+		}
+		id, err := hex.DecodeString(parts[1])
+		n, numberErr := strconv.Atoi(parts[2])
+		if err != nil || len(id) != 12 || hex.EncodeToString(id) != parts[1] || numberErr != nil || n < 0 || strconv.Itoa(n) != parts[2] {
+			return "Некорректная кнопка.", nil
+		}
+	case "h1":
+		if _, _, _, err := dialog.Parse(cb.Data); err != nil {
+			return "Некорректная кнопка.", nil
+		}
+	default:
 		return "Некорректная кнопка.", nil
 	}
 	var v screen

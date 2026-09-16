@@ -123,6 +123,9 @@ func run(ctx context.Context, c config, backup string) error {
 	if e != nil {
 		return e
 	}
+	if e = s.BeginPolling(ctx); e != nil {
+		return e
+	}
 	slog.Info("bot started", "timezone", c.Schedule.Zone, "hour", c.Schedule.Hour, "minute", c.Schedule.Minute)
 	for ctx.Err() == nil {
 		if e = s.Tick(ctx, time.Now().UTC()); e != nil {
@@ -145,6 +148,11 @@ func run(ctx context.Context, c config, backup string) error {
 				return e
 			}
 			continue
+		}
+		if len(updates) == 0 {
+			if e = s.CompleteEmptyPoll(ctx, offset); e != nil {
+				return e
+			}
 		}
 		for _, u := range updates {
 			notice, err := s.Handle(ctx, u, time.Now().UTC())
