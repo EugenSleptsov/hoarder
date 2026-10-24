@@ -69,7 +69,12 @@ func Open(ctx context.Context, path string, owner int64) (*DB, error) {
 	if err = f.Close(); err != nil {
 		return nil, err
 	}
-	u := url.URL{Scheme: "file", Path: abs}
+	// SQLite URIs need forward slashes and a leading slash before a drive letter.
+	uriPath := filepath.ToSlash(abs)
+	if filepath.VolumeName(abs) != "" {
+		uriPath = "/" + uriPath
+	}
+	u := url.URL{Scheme: "file", Path: uriPath}
 	q := u.Query()
 	q.Set("_foreign_keys", "on")
 	q.Set("_journal_mode", "WAL")
