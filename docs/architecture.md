@@ -31,6 +31,7 @@ The scheduler knows a collection of item IDs but never fits a joint model. Deliv
 - `internal/schedule`: IANA-zone calendar-window selection. No consumption inference.
 - `internal/telegram`: a small Bot API HTTP adapter. No stock calculations. Token-bearing request URLs must never appear in returned/logged errors.
 - `internal/app`: ports and command / transaction contracts for the eventual durable bot runtime.
+- `internal/mcp`: a dependency-free Model Context Protocol adapter (Streamable HTTP, POST/JSON, bearer token). It knows tools, not households. `internal/bot` defines the agent tools and runs them in the same transactions as Telegram commands, inside the single bot process. See `agent-integration.md`.
 - `cmd/hoarder-sim`: offline, repeatable demonstration of the reference core. It is not a deployed Telegram daemon.
 
 Production runtime additions: SQL repository, migrations, application command handlers, daily-session worker and executable `cmd/hoarder`. Keep the core usable without those adapters so forecasting can be replayed and tested locally.

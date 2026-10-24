@@ -12,6 +12,7 @@ Read `docs/requirements.md`, `docs/architecture.md`, `docs/forecasting.md` and `
 6. A purchase recommendation is not a purchase. Confirmed additions add to remaining stock exactly once; they do not reset stock to a target.
 7. Unknown purchase history must not generate a fake consumption sample. Reply time is not automatically a depletion/purchase/transition time.
 8. The baseline is non-seasonal and its intervals are heuristic. Do not claim seasonal learning, optimal question timing, calibrated stockout probabilities or measured real-world accuracy without implementing and validating them.
+9. An external shopping agent (MCP) fills carts but never orders. A reported delivery is one exact addition per order and item at its delivery time; reject it when newer evidence exists instead of double counting. Agent-initiated messages stay capped.
 
 ## Engineering rules
 

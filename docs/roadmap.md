@@ -1,6 +1,6 @@
 # Implementation roadmap
 
-Status: 2026-09-16. `cmd/hoarder` is a runnable single-owner Telegram bot with SQLite, inline callbacks, independent saved plans, daily delivery and item management. This is an initial implementation, not a production-readiness or forecast-accuracy claim.
+Status: 2026-10-24. `cmd/hoarder` is a runnable single-owner Telegram bot with SQLite, inline callbacks, independent saved plans, daily delivery, item management and an optional MCP endpoint for an external shopping agent. This is an initial implementation, not a production-readiness or forecast-accuracy claim.
 
 ## Invariants
 
@@ -56,7 +56,9 @@ Validated environment or token-file configuration, owner-bound database, gracefu
 
 CI checks module integrity and formatting, runs vet/race tests, builds the bot and runs the offline simulation. An optional short-lived source-bundle workflow makes tracked code plus checksum-verified vendored dependencies available for offline development. It contains no live inventory or credentials and is not deployment packaging.
 
-Pending: health endpoint, service/container packaging, backup scheduling/retention, error diagnostics and broader failure tests. No owner token, live Telegram connection, production deployment or household pilot has been used.
+A systemd user unit (`deploy/hoarder.service`) exists, and since 2026-10-24 one owner deployment runs with live Telegram. No household-pilot results exist yet.
+
+Pending: health endpoint, container packaging, backup scheduling/retention, error diagnostics and broader failure tests.
 
 ## H006 — Pilot and model evaluation: not implemented
 
@@ -68,6 +70,16 @@ Add controlled steady-use, hidden-purchase, no-use, intermittent, seasonal and s
 
 `interval-baseline-v1` remains non-seasonal with heuristic ranges, not calibrated probabilities. Candidate improvements include censored observations, local rate changes, intermittent occurrence/quantity models, per-item lead-time learning and selective questions. Annual seasonality needs repeated observations and better rolling-origin performance for that item. No pooled household/category learning and no automatic reserve growth.
 
+## H008 — Agent integration over MCP: implemented initial slice
+
+Decision 2026-10-24: an external shopping agent (an MCP client such as a Claude Code session with the Knuspr MCP) may read recommendations and report deliveries; hoarder itself stays LLM-free and never orders. `internal/mcp` is a dependency-free Streamable HTTP server (POST/JSON only, bearer token, loopback-only, browser origins refused). `bot.AgentTools` exposes `shopping_needs`, shop links, `record_delivery`, `request_checks` and `notify_owner`. See [agent-integration.md](agent-integration.md).
+
+Per-item forecasts are evaluated at an agent-chosen moment without cross-item input; `min_units_to_cover` is a derived minimum, never a stored target. Deliveries are exact additions keyed by order, idempotent, and rejected when newer evidence exists. Agent-initiated questions and messages are an explicit exception to the common slot, capped at 10 messages per local day. Tests cover protocol rules, authentication, idempotency, double-count protection, item independence and configuration; four new seeded faults have named witnesses.
+
+Live on 2026-10-24: the bot runs on a server as a systemd user service with real Telegram; a Claude Code session reaches hoarder through the SSH stdio bridge (`deploy/mcp-stdio.py`) and Knuspr through OAuth, with Knuspr checkout, order and account tools denied by client permissions. Only reads were exercised.
+
+Pending: a first real cart and recorded delivery; delivery correction; several links per item; retention of `agent_notice` records; a wake-up of the sender instead of waiting for the next poll cycle.
+
 ## Outside scope
 
-Automatic ordering/payment, medication-critical guarantees, expiry accounting, receipt/email/calendar integration, global shopping optimization and an LLM dependency require separate product decisions.
+Automatic ordering/payment, medication-critical guarantees, expiry accounting, receipt/email/calendar integration, global shopping optimization and an LLM dependency inside hoarder require separate product decisions. H008 is the decision for an external agent; it does not authorise ordering or payment.

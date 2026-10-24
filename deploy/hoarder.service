@@ -1,0 +1,23 @@
+# systemd user service for one hoarder process per database and token.
+# Install for the bot's own account (lingering keeps it running without a login):
+#   sudo loginctl enable-linger "$USER"      # once, by an administrator
+#   install -D -m 0644 deploy/hoarder.service ~/.config/systemd/user/hoarder.service
+#   systemctl --user daemon-reload && systemctl --user enable --now hoarder
+# Logs: journalctl --user -u hoarder
+[Unit]
+Description=hoarder household consumables bot
+
+[Service]
+Type=simple
+WorkingDirectory=%h/bots/hoarder
+EnvironmentFile=%h/bots/hoarder/.env
+ExecStart=%h/bots/hoarder/bin/hoarder
+# The bot stops gracefully on SIGTERM; never run a second copy on the same database.
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=20
+NoNewPrivileges=yes
+UMask=0077
+
+[Install]
+WantedBy=default.target

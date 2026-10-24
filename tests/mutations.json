@@ -250,5 +250,41 @@
     "after": "s.Stock.Mid()/s.Rate.Mid()",
     "required": false,
     "rationale": "Diagnostic probe, not a required kill: the independent safety deadline still subtracts lead time and is never later than the ordinary no-reserve deadline. Dates/actions/stock remain unchanged; only the reason tie-break can change. This is NOT claimed to be fully equivalent. It survived both runs and is retained in the report rather than silently excluded."
+  },
+  {
+    "id": "M29",
+    "title": "Accept MCP calls without the bearer token",
+    "path": "internal/mcp/server.go",
+    "before": "if !ok || subtle.ConstantTimeCompare([]byte(given), s.token) != 1 {",
+    "after": "if false && (!ok || subtle.ConstantTimeCompare([]byte(given), s.token) != 1) {",
+    "required": true,
+    "witness": "TestRejectsMissingOrWrongTokenAndBrowserOrigins"
+  },
+  {
+    "id": "M30",
+    "title": "Bind the MCP endpoint to a public address",
+    "path": "cmd/hoarder/main.go",
+    "before": "host != \"localhost\" && (ip == nil || !ip.IsLoopback())",
+    "after": "false && host != \"localhost\" && (ip == nil || !ip.IsLoopback())",
+    "required": true,
+    "witness": "TestMCPConfigRequiresLoopbackAndStrongToken"
+  },
+  {
+    "id": "M31",
+    "title": "Reset stock to a delivered quantity instead of adding it",
+    "path": "internal/bot/agent.go",
+    "before": "ItemID: state.Config.ID, Kind: item.Addition,\n\t\tAt: at,",
+    "after": "ItemID: state.Config.ID, Kind: item.Snapshot,\n\t\tAt: at,",
+    "required": true,
+    "witness": "TestDeliveryAddsExactlyOnceAndClosesTheRecommendation"
+  },
+  {
+    "id": "M32",
+    "title": "Let an agent flood the owner chat",
+    "path": "internal/bot/agent.go",
+    "before": "if sent >= maxNotifications {",
+    "after": "if false && sent >= maxNotifications {",
+    "required": true,
+    "witness": "TestRequestChecksAskNowAndNotificationsAreCapped"
   }
 ]

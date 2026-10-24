@@ -95,3 +95,14 @@ Synthetic scenarios are regression tests, not evidence of real-world forecast ac
 ## Initial scope and exclusions
 
 Start with one household and ordinary non-perishable consumables. No medical-critical stock guarantees, perishable expiry modelling, automatic ordering, receipt/email/calendar integrations, LLM dependency, cross-item learning, or automatic reserve optimisation. These are explicit scope boundaries rather than silently implemented assumptions.
+
+## External shopping agent (decision 2026-10-24)
+
+The owner may connect an external agent over MCP to fill a shop cart and report deliveries. The LLM runs outside hoarder; hoarder offers deterministic tools only. The invariants above still hold, with these explicit additions:
+
+- The agent fills a cart; it never places or pays for an order. Checkout stays with the owner.
+- A cart groups items for one delivery, but forecasts, question dates and recommendations never depend on that grouping. Evaluating an item at an agent-chosen future moment uses only that item.
+- A reported delivery is a confirmed addition of an exact quantity at the order's delivery time, applied once per order and item. A delivery older than the item's latest evidence is rejected rather than double counted.
+- Shop links are integration configuration, not item policy, and never change reserve or units.
+- hoarder tracks durable, non-perishable consumables only. Groceries are not modelled: the agent proposes them from the shop's own order history and the owner confirms them. They never become hoarder items or deliveries.
+- Agent-requested stock checks and owner notifications are an explicit exception to the common delivery slot, initiated by the owner's own agent and capped per day.

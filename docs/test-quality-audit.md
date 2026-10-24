@@ -141,6 +141,19 @@ The forecast package's statement coverage stayed **95.2% before and after**, des
 
 [GitHub Actions run 35068758136](https://github.com/EugenSleptsov/hoarder/actions/runs/35068758136), job `104705045876`, completed successfully on `aaed98f174f43213be1f82d1ac3135520cdf0770`. It passed dependency verification, formatting, vet/race tests, runner self-tests, executable build/help, simulation and the full named-witness mutation gate. Workflow environment: Ubuntu 24.04, Go 1.27.1, CGO enabled.
 
+## Agent integration additions (2026-10-24)
+
+The MCP slice added four required mutations, each written together with its witness rather than discovered as a survivor:
+
+| ID | Change | Witness |
+|---|---|---|
+| M29 | Accept MCP calls without the bearer token | `TestRejectsMissingOrWrongTokenAndBrowserOrigins` |
+| M30 | Bind the MCP endpoint to a public address | `TestMCPConfigRequiresLoopbackAndStrongToken` |
+| M31 | Reset stock to a delivered quantity instead of adding it | `TestDeliveryAddsExactlyOnceAndClosesTheRecommendation` |
+| M32 | Let an agent flood the owner chat | `TestRequestChecksAskNowAndNotificationsAreCapped` |
+
+The full 32-change campaign ran locally on Windows 11 amd64 with Go 1.26 and scoop GCC (`PYTHONUTF8=1`): 31 required faults detected by their named witnesses, M28 survived as disclosed. Because these cases were written with the feature, they are regression protection for the agent boundary, not an independent measure of how good its tests are. No CI run on this change is claimed here.
+
 ## Remaining uncertainty
 
 These are selected mutations, not a whole-program operator sweep, and the new cases were chosen after inspecting the initial survivors. Detection of these faults is concrete regression evidence, not independent statistical validation of all tests. A passing scenario proves neither production availability nor the usefulness of a forecast to a household.

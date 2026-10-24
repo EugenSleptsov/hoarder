@@ -10,14 +10,22 @@ import (
 	"github.com/EugenSleptsov/hoarder/internal/sqlstore"
 )
 
+// recommends applies the shopping-list rule to one item at one moment.
+func recommends(state item.State, at time.Time) (bool, forecast.Decision, error) {
+	decision, err := (forecast.Baseline{}).Predict(state, at)
+	if err != nil {
+		return false, decision, err
+	}
+	return decision.Stock.Mid() <= state.Config.ReserveUnits || decision.PossibleShortageBeforePurchase, decision, nil
+}
+
 // updateIntent reconciles a recommendation only. It never records a purchase,
 // creates a physical observation or touches another item's plan.
 func (s *Service) updateIntent(ctx context.Context, tx *sqlstore.Tx, state item.State, now time.Time) (bool, error) {
-	decision, err := (forecast.Baseline{}).Predict(state, now)
+	needed, _, err := recommends(state, now)
 	if err != nil {
 		return false, err
 	}
-	needed := decision.Stock.Mid() <= state.Config.ReserveUnits || decision.PossibleShortageBeforePurchase
 	if !needed {
 		return false, tx.Delete(ctx, "intent", state.Config.ID)
 	}

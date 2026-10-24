@@ -6,6 +6,8 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -14,14 +16,60 @@ import (
 	"time"
 
 	"github.com/EugenSleptsov/hoarder/internal/bot"
+	"github.com/EugenSleptsov/hoarder/internal/mcp"
 	"github.com/EugenSleptsov/hoarder/internal/sqlstore"
 	"github.com/EugenSleptsov/hoarder/internal/telegram"
 )
 
+const mcpVersion = "0.1.0"
+
 type config struct {
-	Owner       int64
-	Path, Token string
-	Schedule    bot.Config
+	Owner             int64
+	Path, Token       string
+	Schedule          bot.Config
+	MCPAddr, MCPToken string
+}
+
+// readSecret accepts NAME or NAME_FILE, never both. Values are never logged.
+func readSecret(get func(string) string, name string) (string, error) {
+	value := strings.TrimSpace(get(name))
+	if file := get(name + "_FILE"); file != "" {
+		if value != "" {
+			return "", fmt.Errorf("set only one of %s and %s_FILE", name, name)
+		}
+		b, err := os.ReadFile(file)
+		if err != nil {
+			return "", fmt.Errorf("cannot read %s_FILE", name)
+		}
+		value = strings.TrimSpace(string(b))
+	}
+	if value == "" {
+		return "", fmt.Errorf("%s or %s_FILE required", name, name)
+	}
+	return value, nil
+}
+
+// loadMCP keeps the agent endpoint on loopback. Remote agents reach it only
+// through an authenticated tunnel or TLS proxy, never a public plain port.
+func loadMCP(get func(string) string, c *config) error {
+	c.MCPAddr = get("HOARDER_MCP_ADDR")
+	if c.MCPAddr == "" {
+		return nil
+	}
+	host, port, err := net.SplitHostPort(c.MCPAddr)
+	if err != nil || port == "" {
+		return errors.New("HOARDER_MCP_ADDR must be host:port")
+	}
+	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+		return errors.New("HOARDER_MCP_ADDR must be a loopback address")
+	}
+	if c.MCPToken, err = readSecret(get, "HOARDER_MCP_TOKEN"); err != nil {
+		return err
+	}
+	if len(c.MCPToken) < 32 {
+		return errors.New("HOARDER_MCP_TOKEN must have at least 32 characters")
+	}
+	return nil
 }
 
 func loadConfig(get func(string) string, readToken bool) (config, error) {
@@ -62,22 +110,10 @@ func loadConfig(get func(string) string, readToken bool) (config, error) {
 	if !readToken {
 		return c, nil
 	}
-	c.Token = strings.TrimSpace(get("TELEGRAM_BOT_TOKEN"))
-	file := get("TELEGRAM_BOT_TOKEN_FILE")
-	if file != "" {
-		if c.Token != "" {
-			return c, errors.New("set only one token source")
-		}
-		b, err := os.ReadFile(file)
-		if err != nil {
-			return c, errors.New("cannot read token file")
-		}
-		c.Token = strings.TrimSpace(string(b))
+	if c.Token, e = readSecret(get, "TELEGRAM_BOT_TOKEN"); e != nil {
+		return c, e
 	}
-	if c.Token == "" {
-		return c, errors.New("TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN_FILE required")
-	}
-	return c, nil
+	return c, loadMCP(get, &c)
 }
 
 func wait(ctx context.Context, d time.Duration) error {
@@ -122,6 +158,13 @@ func run(ctx context.Context, c config, backup string) error {
 	api, e := telegram.New(c.Token)
 	if e != nil {
 		return e
+	}
+	if c.MCPAddr != "" {
+		stop, err := serveMCP(ctx, c.MCPAddr, c.MCPToken, s)
+		if err != nil {
+			return err
+		}
+		defer stop()
 	}
 	if e = s.BeginPolling(ctx); e != nil {
 		return e
@@ -177,6 +220,39 @@ func run(ctx context.Context, c config, backup string) error {
 	}
 	return ctx.Err()
 }
+
+// serveMCP binds before polling starts so a wrong address fails at startup.
+// The endpoint shares this process and its single SQLite writer; agent writes
+// are ordinary transactions, and queued messages go out with the next flush.
+func serveMCP(ctx context.Context, addr, token string, s *bot.Service) (func(), error) {
+	handler, err := mcp.New(mcp.Info{Name: "hoarder", Version: mcpVersion, Instructions: bot.AgentInstructions},
+		token, s.AgentTools(func() time.Time { return time.Now().UTC() }))
+	if err != nil {
+		return nil, err
+	}
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("MCP listener: %w", err)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/mcp", handler)
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second,
+		WriteTimeout: 30 * time.Second, IdleTimeout: time.Minute, MaxHeaderBytes: 16 << 10,
+		BaseContext: func(net.Listener) context.Context { return ctx }}
+	go func() {
+		// A failing agent endpoint must not stop household questions.
+		if err := srv.Serve(listener); !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("MCP server stopped", "error", err)
+		}
+	}()
+	slog.Info("MCP server started", "address", listener.Addr().String())
+	return func() {
+		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		srv.Shutdown(shutdown)
+	}, nil
+}
+
 func main() {
 	backup := flag.String("backup", "", "write a consistent backup to a new file and exit")
 	flag.Parse()
