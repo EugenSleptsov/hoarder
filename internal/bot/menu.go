@@ -3,12 +3,33 @@ package bot
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/EugenSleptsov/hoarder/internal/dialog"
+	"github.com/EugenSleptsov/hoarder/internal/item"
 	"github.com/EugenSleptsov/hoarder/internal/sqlstore"
 	"github.com/EugenSleptsov/hoarder/internal/telegram"
 )
+
+// byName orders items for presentation only. The stable sort keeps the store's
+// ID order for equal names, so pages do not reshuffle between renders.
+func byName(states []item.State) {
+	key := func(s item.State) string { return strings.ReplaceAll(strings.ToLower(s.Config.Name), "ё", "е") }
+	slices.SortStableFunc(states, func(a, b item.State) int { return strings.Compare(key(a), key(b)) })
+}
+
+// navGroup marks buttons that share a row; items keep a full row each.
+func navGroup(a action) string {
+	switch a.Kind {
+	case "page":
+		return "page"
+	case "add", "view":
+		return "menu"
+	}
+	return ""
+}
 
 func (s *Service) menu(ctx context.Context, tx *sqlstore.Tx, view string, page int, ids []string, messageID int64, now time.Time) error {
 	id, e := s.menuScreen(ctx, tx, view, page, ids, messageID, now)
@@ -115,7 +136,13 @@ func render(v screen, owner int64) telegram.Text {
 		}
 	} else {
 		for i, a := range v.Actions {
-			rows = append(rows, []telegram.Button{{Text: a.Label, Data: fmt.Sprintf("m1:%s:%d", v.ID, i)}})
+			b := telegram.Button{Text: a.Label, Data: fmt.Sprintf("m1:%s:%d", v.ID, i)}
+			last := len(rows) - 1
+			if g := navGroup(a); g != "" && last >= 0 && len(rows[last]) == 1 && navGroup(v.Actions[i-1]) == g {
+				rows[last] = append(rows[last], b)
+				continue
+			}
+			rows = append(rows, []telegram.Button{b})
 		}
 	}
 	return telegram.Text{ChatID: owner, MessageID: v.MessageID, Text: text, Keyboard: &telegram.Keyboard{Rows: rows}}

@@ -328,6 +328,7 @@ func (s *Service) selectItems(ctx context.Context, tx *sqlstore.Tx, view string,
 	if e != nil {
 		return nil, e
 	}
+	byName(states)
 	ids := []string{}
 	for _, state := range states {
 		if state.Archived != (view == "archive") {
