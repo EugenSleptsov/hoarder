@@ -24,6 +24,7 @@ import (
 const (
 	ShopKnuspr       = "knuspr"
 	maxCoverUnits    = 50
+	maxFillUnits     = 2*item.MaxPolicyUnits + maxCoverUnits
 	maxDeliveryLines = 50
 	maxChecks        = 10
 	maxNotifications = 10
@@ -56,6 +57,7 @@ type Need struct {
 	Name            string        `json:"name"`
 	Paused          bool          `json:"paused"`
 	ReserveUnits    float64       `json:"reserve_units"`
+	FullSetUnits    float64       `json:"full_set_units"`
 	LeadDays        float64       `json:"lead_days"`
 	StockNow        item.Interval `json:"stock_now"`
 	StockAtUntil    item.Interval `json:"stock_at_until"`
@@ -67,8 +69,13 @@ type Need struct {
 	// MinUnitsToCover is the smallest whole number of units after which this
 	// item would no longer be recommended at Until. It is not a stock target.
 	// Nil means more than maxCoverUnits would be needed.
-	MinUnitsToCover *int       `json:"min_units_to_cover"`
-	Links           []ShopLink `json:"links"`
+	MinUnitsToCover *int `json:"min_units_to_cover"`
+	// UnitsToFullSet is what to buy: the smallest whole number of units after
+	// which the projected stock at Until reaches the full set plus the reserve,
+	// never less than MinUnitsToCover. It sizes a cart, it never resets stock.
+	// Zero when the item is not needed; nil when the minimum is unknown too.
+	UnitsToFullSet *int       `json:"units_to_full_set"`
+	Links          []ShopLink `json:"links"`
 }
 
 type DeliveryLine struct {
@@ -167,12 +174,12 @@ func need(state item.State, now, until time.Time) (Need, error) {
 		return Need{}, err
 	}
 	n := Need{ItemID: state.Config.ID, Name: state.Config.Name, Paused: state.Paused,
-		ReserveUnits: state.Config.ReserveUnits, LeadDays: state.Config.LeadDays,
+		ReserveUnits: state.Config.ReserveUnits, FullSetUnits: state.Config.FullSet(), LeadDays: state.Config.LeadDays,
 		StockNow: stockNow, StockAtUntil: decision.Stock, RatePerDay: state.Rate,
 		LearningSamples: state.Samples, LastObservation: state.Anchor.At, NeededByUntil: needed}
 	if !needed {
 		zero := 0
-		n.MinUnitsToCover = &zero
+		n.MinUnitsToCover, n.UnitsToFullSet = &zero, &zero
 		return n, nil
 	}
 	for units := 1; units <= maxCoverUnits; units++ {
@@ -191,7 +198,43 @@ func need(state item.State, now, until time.Time) (Need, error) {
 			break
 		}
 	}
+	if n.MinUnitsToCover == nil {
+		return n, nil
+	}
+	fill, err := unitsToFullSet(state, start, until)
+	if err != nil {
+		return Need{}, err
+	}
+	if fill != nil && *fill < *n.MinUnitsToCover {
+		fill = n.MinUnitsToCover
+	}
+	n.UnitsToFullSet = fill
 	return n, nil
+}
+
+// unitsToFullSet probes whole additions at start, exactly as a delivery adds
+// them, until the stock projected at until reaches the full set plus reserve.
+func unitsToFullSet(state item.State, start, until time.Time) (*int, error) {
+	target := state.Config.FullSet() + state.Config.ReserveUnits
+	for units := 0; units <= maxFillUnits; units++ {
+		next := state
+		if units > 0 {
+			probe := item.Event{ID: "probe", ItemID: state.Config.ID, Kind: item.Addition, At: start,
+				Quantity: item.Interval{Low: float64(units), High: float64(units)}}
+			var err error
+			if next, err = state.Apply(probe); err != nil {
+				return nil, err
+			}
+		}
+		stock, err := next.Project(until)
+		if err != nil {
+			return nil, err
+		}
+		if stock.Mid() >= target-1e-9 {
+			return &units, nil
+		}
+	}
+	return nil, nil
 }
 
 func (s *Service) shopLinks(ctx context.Context, tx *sqlstore.Tx) (map[string][]ShopLink, error) {

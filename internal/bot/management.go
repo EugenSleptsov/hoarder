@@ -19,7 +19,7 @@ func itemAction(label, kind string, state item.State) action {
 }
 
 func configurationText(c item.Config) string {
-	return fmt.Sprintf("Резерв: %g уп.\nВремя на покупку: %g дн.\nМаксимальный интервал проверки: %g дн.", c.ReserveUnits, c.LeadDays, c.MaxCheckDays)
+	return fmt.Sprintf("Полный набор: %g уп.\nРезерв: %g уп.\nВремя на покупку: %g дн.\nМаксимальный интервал проверки: %g дн.", c.FullSet(), c.ReserveUnits, c.LeadDays, c.MaxCheckDays)
 }
 
 func (s *Service) managementCard(ctx context.Context, tx *sqlstore.Tx, state item.State, messageID int64, now time.Time) error {
@@ -89,7 +89,7 @@ func (s *Service) managementCallback(ctx context.Context, tx *sqlstore.Tx, a act
 	switch a.Kind {
 	case "settings":
 		actions := []action{}
-		for _, choice := range []struct{ label, field string }{{"Резерв", "reserve"}, {"Время на покупку", "lead"}, {"Интервал проверки", "gap"}} {
+		for _, choice := range []struct{ label, field string }{{"Полный набор", "full"}, {"Резерв", "reserve"}, {"Время на покупку", "lead"}, {"Интервал проверки", "gap"}} {
 			b := itemAction(choice.label, "setting", state)
 			b.Field = choice.field
 			actions = append(actions, b)
@@ -121,8 +121,10 @@ func (s *Service) managementCallback(ctx context.Context, tx *sqlstore.Tx, a act
 func (s *Service) settingChoices(ctx context.Context, tx *sqlstore.Tx, state item.State, field string, messageID int64, now time.Time) error {
 	var values []float64
 	switch field {
+	case "full":
+		values = []float64{1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24}
 	case "reserve":
-		values = []float64{0, 1}
+		values = []float64{0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24}
 	case "lead":
 		values = []float64{1, 3, 7, 14}
 	case "gap":
@@ -135,10 +137,19 @@ func (s *Service) settingChoices(ctx context.Context, tx *sqlstore.Tx, state ite
 		cfg := state.Config
 		label := fmt.Sprintf("%g дней", value)
 		switch field {
+		case "full":
+			cfg = cfg.WithFullSet(value)
+			label = fmt.Sprintf("Набор: %g уп.", value)
+			if value == 1 {
+				label = "Набор: 1 упаковка"
+			}
 		case "reserve":
 			cfg.ReserveUnits, cfg.WithReserve = value, value > 0
-			label = "Без резерва"
-			if value > 0 {
+			label = fmt.Sprintf("Резерв: %g уп.", value)
+			switch value {
+			case 0:
+				label = "Без резерва"
+			case 1:
 				label = "Резерв: 1 упаковка"
 			}
 		case "lead":
@@ -151,7 +162,14 @@ func (s *Service) settingChoices(ctx context.Context, tx *sqlstore.Tx, state ite
 		actions = append(actions, a)
 	}
 	actions = append(actions, itemAction("Отмена", "manage", state))
-	return s.note(ctx, tx, state.Config.Name+"\n\nВыберите новое значение. Следующий экран запросит подтверждение.", actions, messageID, now)
+	text := state.Config.Name + "\n\nВыберите новое значение. Следующий экран запросит подтверждение."
+	switch field {
+	case "full":
+		text += "\nПолный набор — сколько упаковок должно быть в работе после покупки. Покупка предлагается, когда остаток дойдёт до резерва: докупить до набора плюс резерв. Дату проверки набор не меняет."
+	case "reserve":
+		text += "\nРезерв — сколько упаковок не трогать на случай ошибки прогноза. Он не растёт автоматически."
+	}
+	return s.note(ctx, tx, text, actions, messageID, now)
 }
 
 func (s *Service) applyControl(ctx context.Context, tx *sqlstore.Tx, state item.State, a action, commandID string, messageID int64, now time.Time) (string, error) {

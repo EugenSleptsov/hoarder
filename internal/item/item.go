@@ -29,21 +29,48 @@ func (v Interval) Mid() float64 { return v.Low + (v.High-v.Low)/2 }
 
 func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
 
+// MaxPolicyUnits bounds the explicitly configured reserve and full set.
+const MaxPolicyUnits = 99
+
 type Config struct {
 	ID           string  `json:"id"`
 	Name         string  `json:"name"`
 	WithReserve  bool    `json:"with_reserve"`
 	ReserveUnits float64 `json:"reserve_units"`
+	// FullUnits is how many packages should be in use after replenishment, on
+	// top of the reserve. It sizes recommendations only, never stock or plans.
+	// Zero means one package, so older events keep their bytes and receipts.
+	FullUnits    float64 `json:"full_units,omitempty"`
 	LeadDays     float64 `json:"lead_days"`
 	MaxCheckDays float64 `json:"max_check_days"`
+}
+
+// FullSet is the configured full set in packages.
+func (c Config) FullSet() float64 {
+	if c.FullUnits == 0 {
+		return 1
+	}
+	return c.FullUnits
+}
+
+// WithFullSet stores one package as zero so that equal policies compare equal.
+func (c Config) WithFullSet(n float64) Config {
+	if n == 1 {
+		n = 0
+	}
+	c.FullUnits = n
+	return c
 }
 
 func (c Config) Validate() error {
 	if strings.TrimSpace(c.ID) == "" || strings.TrimSpace(c.Name) == "" {
 		return errors.New("item ID and name are required")
 	}
-	if !finite(c.ReserveUnits) || c.ReserveUnits < 0 || c.WithReserve != (c.ReserveUnits > 0) {
-		return errors.New("reserve flag and fixed reserve units disagree")
+	if !finite(c.ReserveUnits) || c.ReserveUnits < 0 || c.ReserveUnits > MaxPolicyUnits || c.WithReserve != (c.ReserveUnits > 0) {
+		return errors.New("reserve must be 0-99 units and agree with its flag")
+	}
+	if c.FullUnits != 0 && (c.FullUnits < 2 || c.FullUnits > MaxPolicyUnits || c.FullUnits != math.Trunc(c.FullUnits)) {
+		return errors.New("full set must be a whole 2-99 packages; zero means one")
 	}
 	if !finite(c.LeadDays) || c.LeadDays < 0 || c.LeadDays > 365 {
 		return errors.New("lead days must be between 0 and 365")

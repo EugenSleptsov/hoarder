@@ -29,6 +29,8 @@ func navGroup(a action) string {
 		return "menu"
 	case "settings", "rename":
 		return "item"
+	case "config_preview":
+		return "value"
 	}
 	return ""
 }
@@ -80,6 +82,13 @@ func (s *Service) menuScreen(ctx context.Context, tx *sqlstore.Tx, view string, 
 		if e != nil {
 			return "", e
 		}
+		if view == "shop" {
+			line, e := shoppingLine(state, now)
+			if e != nil {
+				return "", e
+			}
+			text += "\n• " + line
+		}
 		kind := "check"
 		label := state.Config.Name
 		if view == "shop" {
@@ -122,6 +131,26 @@ func (s *Service) menuScreen(ctx context.Context, tx *sqlstore.Tx, view string, 
 	}
 	v := screen{MenuView: view, MenuIDs: ids, ID: id, Text: text, Actions: actions, MessageID: messageID, ExpiresAt: now.Add(7 * 24 * time.Hour)}
 	return id, tx.Insert(ctx, "screen", id, v)
+}
+
+// shoppingLine sizes one recommendation with this item's own forecast at the
+// end of its purchase allowance. It is a suggestion, not a purchase.
+func shoppingLine(state item.State, now time.Time) (string, error) {
+	n, err := need(state, now, now.Add(time.Duration(state.Config.LeadDays*float64(24*time.Hour))))
+	if err != nil {
+		return "", err
+	}
+	policy := fmt.Sprintf("набор %g + резерв %g", state.Config.FullSet(), state.Config.ReserveUnits)
+	if state.Config.ReserveUnits == 0 {
+		policy = fmt.Sprintf("набор %g, без резерва", state.Config.FullSet())
+	}
+	switch {
+	case n.UnitsToFullSet == nil:
+		return fmt.Sprintf("%s: больше %d уп. (%s)", state.Config.Name, maxCoverUnits, policy), nil
+	case *n.UnitsToFullSet == 0:
+		return state.Config.Name + ": проверьте остаток", nil
+	}
+	return fmt.Sprintf("%s: ≈%d уп., до %g (%s)", state.Config.Name, *n.UnitsToFullSet, state.Config.FullSet()+state.Config.ReserveUnits, policy), nil
 }
 
 func render(v screen, owner int64) telegram.Text {

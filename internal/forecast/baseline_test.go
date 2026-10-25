@@ -104,3 +104,22 @@ func TestExtremeRateCannotOverflowDeadline(t *testing.T) {
 		t.Fatal(d, err)
 	}
 }
+
+func TestFullSetSizesPurchasesButNeverMovesTheQuestion(t *testing.T) {
+	for _, reserve := range []bool{false, true} {
+		s := fixture(t, reserve)
+		set := s
+		set.Config = s.Config.WithFullSet(8)
+		for _, day := range []int{0, 10, 25, 40, 70} {
+			at := s.AsOf.Add(time.Duration(day) * 24 * time.Hour)
+			want, err := (Baseline{}).Predict(s, at)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := (Baseline{}).Predict(set, at)
+			if err != nil || got != want {
+				t.Fatalf("full set changed the decision at day %d: %+v, want %+v (%v)", day, got, want, err)
+			}
+		}
+	}
+}

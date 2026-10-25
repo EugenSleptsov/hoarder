@@ -320,6 +320,9 @@ func TestAgentToolsOverMCP(t *testing.T) {
 	if needs["isError"] != false || len(items) != 1 || items[0].(map[string]any)["needed_by_until"] != true {
 		t.Fatal(needs)
 	}
+	if first := items[0].(map[string]any); first["full_set_units"] != 1.0 || first["units_to_full_set"].(float64) < first["min_units_to_cover"].(float64) {
+		t.Fatal("cart size missing from the tool result", first)
+	}
 	for args, want := range map[string]string{
 		`{}`: "exactly one",
 		`{"horizon_days":1,"until":"2026-09-16T00:00:00Z"}`: "exactly one",

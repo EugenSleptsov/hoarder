@@ -1,12 +1,12 @@
 # Item lifecycle and explicit settings
 
-Status: implemented initial slice, 2026-09-16; renaming added 2026-10-25. Code and tests live in `internal/item/controls.go`, `internal/bot/management.go`, `internal/bot/rename.go` and their regression tests. This does not establish production readiness or forecasting accuracy.
+Status: implemented initial slice, 2026-09-16; renaming, full sets and larger reserves added 2026-10-25. Code and tests live in `internal/item/controls.go`, `internal/bot/management.go`, `internal/bot/rename.go` and their regression tests. This does not establish production readiness or forecasting accuracy.
 
 ## User flow
 
 `/manage` or the registry's management button opens a list of non-archived items. Each item card exposes a manual stock check, settings, pause/resume and archive confirmation. `/archive` lists archived items and offers restoration onto pause. Normal stock checks retain their previous direct path; management is not an extra mandatory step.
 
-Settings offer fixed reserve 0/1 package, purchase lead time 1/3/7/14 days and maximum observation gap 7/30/90/180 days. Selecting a value displays the old and new configuration; only confirmation changes it. Saving identical configuration is a no-op for the item revision, history and dates.
+Settings offer a full set of 1–24 packages, a fixed reserve of 0–24 packages, purchase lead time 1/3/7/14 days and maximum observation gap 7/30/90/180 days. Selecting a value displays the old and new configuration; only confirmation changes it. Saving identical configuration is a no-op for the item revision, history and dates.
 
 Rename (added 2026-10-25) asks for the new name as the next text message: one line of at most 80 characters, no command prefix. The name must not match another item, archived ones included, case-insensitively; changing only the case of the item's own name is allowed. The typed message is the explicit act, so there is no extra confirmation screen. The card then shows the old and new name.
 
@@ -20,7 +20,9 @@ Archival requires confirmation and retains immutable history. It is not secure e
 
 A rename is a `reconfigure` event whose configuration differs only in `Name`. It keeps evidence, rate, samples, item ID, shop links and the saved plan date, overdue dates included. A name is presentation, not evidence, so it never re-plans. Only the plan's expected revision follows the item, and an open stock question for the item is retired because it shows the old name and revision. The pending rename is a `runtime/renaming` record bound to one prompt screen and to the item revision on that prompt. It ends when any prompt button is tapped, after 30 minutes, on `/cancel` or any other command, or when `/add` opens. A changed item revision rejects the typed name instead of applying it over a newer answer.
 
-An explicit configuration change preserves physical evidence, rates and samples. It recalculates only that item's plan and purchase recommendation. Neither enabling a reserve nor increasing lead time adds stock. The algorithm never changes the reserve automatically. Resume also reconciles the recommendation against current projected stock without changing evidence or the saved plan date.
+An explicit configuration change preserves physical evidence, rates and samples. It recalculates only that item's plan and purchase recommendation. Neither enabling a reserve nor increasing lead time adds stock. The algorithm never changes the reserve automatically.
+
+The full set (`full_units`) is how many packages should be in use after replenishment, on top of the reserve. The reserve still decides when an item is recommended; the full set only sizes the recommendation: buy up to full set plus reserve, projected at the delivery moment. It never resets stock, never becomes an addition and never moves the question date, so a set-only change keeps the plan date. One package is stored as zero, which keeps legacy configuration bytes and receipt hashes, and makes choosing one package again a no-op. Both the full set and the reserve are whole explicit numbers up to 99 in the domain; the buttons offer up to 24. Resume also reconciles the recommendation against current projected stock without changing evidence or the saved plan date.
 
 ## Events and compatibility
 
@@ -28,7 +30,7 @@ An explicit configuration change preserves physical evidence, rates and samples.
 
 Configuration is an optional event payload omitted for legacy events. Existing receipt hashes retain their original encoding. Replay starts from the original stored state and applies observation and control events in sequence. Events, projection, plan, intent, invalidated active question, callback receipt and response outbox share one transaction.
 
-Schema v2 keeps the existing table layout but fences out older binaries that do not understand lifecycle state. Startup upgrades v1 after checking ownership; historical JSON and events are not rewritten. Missing lifecycle fields in old items mean active. Back up with the old binary before the first new-version open. Do not manually downgrade `user_version`.
+Schema v2 keeps the existing table layout but fences out older binaries that do not understand lifecycle state. Schema v4 does the same for full sets: an older binary would silently drop `full_units` from the projection. Startup upgrades older versions after checking ownership; historical JSON and events are not rewritten. Missing lifecycle fields in old items mean active. Back up with the old binary before the first new-version open. Do not manually downgrade `user_version`.
 
 ## Callback and delivery safety
 
@@ -40,8 +42,8 @@ SQLite cannot atomically cancel a request already in flight to Telegram. A messa
 
 ## Regression coverage
 
-Tests cover pause without evidence changes, overdue resume, cancellation and confirmation of archival, restored pause, manual checks while paused, stale stock and settings screens, competing confirmations, wrong sender, no-op settings, independent second-item state/plan, recommendation reconciliation, pending digest filtering, transaction rollback, database reopen and mixed legacy/control replay. They run on fake Telegram HTTP and real temporary SQLite, not a live chat.
+Tests cover pause without evidence changes, overdue resume, cancellation and confirmation of archival, restored pause, manual checks while paused, stale stock and settings screens, competing confirmations, wrong sender, no-op settings, independent second-item state/plan, full-set and larger-reserve settings that keep evidence and (for the set) the plan date, recommendation reconciliation, pending digest filtering, transaction rollback, database reopen and mixed legacy/control replay. They run on fake Telegram HTTP and real temporary SQLite, not a live chat.
 
 ## Still outside this slice
 
-Package-unit conversion, arbitrary numeric settings, permanent data erasure, correcting old events, shared schedule migration, multi-user control and automatic cleanup remain separate work. The forecasting algorithm and seasonal-learning limitations are unchanged.
+Package-unit conversion, typed numeric settings, several open packages in one stock answer, permanent data erasure, correcting old events, shared schedule migration, multi-user control and automatic cleanup remain separate work. The forecasting algorithm and seasonal-learning limitations are unchanged.

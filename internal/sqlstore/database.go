@@ -108,7 +108,7 @@ func Open(ctx context.Context, path string, owner int64) (*DB, error) {
 			if _, e := t.tx.ExecContext(ctx, "INSERT INTO metadata(key,value) VALUES('owner',?)", strconv.FormatInt(owner, 10)); e != nil {
 				return e
 			}
-		} else if version < 1 || version > 3 {
+		} else if version < 1 || version > 4 {
 			return errors.New("unsupported database schema version")
 		}
 		var stored string
@@ -119,10 +119,12 @@ func Open(ctx context.Context, path string, owner int64) (*DB, error) {
 			return errors.New("database belongs to a different owner")
 		}
 		// Schema v3 fences earlier readers from new onboarding steps, adding
-		// queues and markup-only deliveries. Legacy item/event bytes and
-		// receipt hashes remain unchanged; old dialogs still have a reader.
-		if version < 3 {
-			_, e := t.tx.ExecContext(ctx, "PRAGMA user_version=3")
+		// queues and markup-only deliveries. Schema v4 fences readers that
+		// would drop a full set from configurations or misread paged counts.
+		// Legacy item/event bytes and receipt hashes remain unchanged; old
+		// dialogs still have a reader.
+		if version < 4 {
+			_, e := t.tx.ExecContext(ctx, "PRAGMA user_version=4")
 			return e
 		}
 		return nil

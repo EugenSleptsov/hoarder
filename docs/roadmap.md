@@ -1,6 +1,6 @@
 # Implementation roadmap
 
-Status: 2026-10-25. `cmd/hoarder` is a runnable single-owner Telegram bot with SQLite, inline callbacks, independent saved plans, daily delivery, item management (including renaming) and an optional MCP endpoint for an external shopping agent. This is an initial implementation, not a production-readiness or forecast-accuracy claim.
+Status: 2026-10-25. `cmd/hoarder` is a runnable single-owner Telegram bot with SQLite, inline callbacks, independent saved plans, daily delivery, item management (including renaming, full sets and larger reserves) and an optional MCP endpoint for an external shopping agent. This is an initial implementation, not a production-readiness or forecast-accuracy claim.
 
 ## Invariants
 
@@ -12,7 +12,7 @@ SQLite persists original item states, immutable events, projections, revisions a
 
 The physical tables are `metadata`, `items`, `events` and generic typed-JSON `records`. Plans, screens, sessions, intents, jobs and runtime receipts use `records`; conceptual tables in the original architecture are not all separate SQL tables. Workflow relations are transactionally checked by the service.
 
-Schema v3 adds a reader compatibility fence for lifecycle/configuration events, quick onboarding, adding queues and markup-only delivery. Owner-checked v1/v2 migration preserves historical payloads and receipt hashes; prior binaries must refuse v3. Normalization, indexes, retention and larger migration fixtures remain future work.
+Schema v3 adds a reader compatibility fence for lifecycle/configuration events, quick onboarding, adding queues and markup-only delivery. Schema v4 fences full sets and paged counts. Owner-checked migration preserves historical payloads and receipt hashes; prior binaries must refuse v4. Normalization, indexes, retention and larger migration fixtures remain future work.
 
 ## H002 — Independent plans and lifecycle: implemented initial slice
 
@@ -21,6 +21,8 @@ Stored dates survive ticks and restart instead of being perpetually recalculated
 Pause/resume, reversible confirmed archival, restoration onto pause and explicit reserve/lead-time/check-gap settings are now implemented through callbacks. Controls preserve stock/rate/observation anchors. Lifecycle controls keep the saved deadline, including overdue dates; configuration changes replan exactly one item. No-op settings preserve revision and deadline. Recommendations reconcile after explicit configuration changes/resume without creating purchases.
 
 Renaming (2026-10-25) is a name-only `reconfigure` event that keeps evidence, links and the saved, possibly overdue, plan date. The text prompt is bound to the shown revision and expires after 30 minutes. Name shortcuts in `/add` can be hidden and restored.
+
+Full sets (2026-10-25): an explicit per-item number of packages in use after replenishment, on top of the reserve. The reserve (now 0–24 by buttons) still decides when to recommend; the full set sizes the recommendation up to set plus reserve in `/shopping` and as `units_to_full_set` for the agent. It changes neither stock nor the question date. Stock checks count up to 99 closed packages by paged buttons.
 
 Pending: package-unit changes, correcting historical answers, explicit shared schedule migration and a measured per-item retry/backoff policy. Unanswered or uncertain due items may still appear the next day. Notification pause is never evidence of zero consumption.
 
@@ -46,7 +48,7 @@ Onboarding uses name shortcuts or text, inline reserve and stock choices, option
 
 Management uses `/manage` and `/archive` plus inline controls. Settings preview old/new values and archive has a confirmation step. Expected item revisions protect both stock observations and management actions. Callback/update receipts and polling offset persist with durable decisions. Tests cover repeated, stale, concurrent and unauthorised callbacks, restart, failed edits and message-scope checks.
 
-Pending: multiple household members/group chats, richer package quantities, corrections and interaction-burden metrics. Current input supports up to three closed packages and one open package and may require several taps; it is not zero-effort tracking.
+Pending: multiple household members/group chats, several open packages in one answer, corrections and interaction-burden metrics. Current input supports up to 99 closed packages and one open package and may require several taps; it is not zero-effort tracking.
 
 ## Adversarial audit — implemented repairs
 
@@ -76,7 +78,7 @@ Add controlled steady-use, hidden-purchase, no-use, intermittent, seasonal and s
 
 Decision 2026-10-24: an external shopping agent (an MCP client such as a Claude Code session with the Knuspr MCP) may read recommendations and report deliveries; hoarder itself stays LLM-free and never orders. `internal/mcp` is a dependency-free Streamable HTTP server (POST/JSON only, bearer token, loopback-only, browser origins refused). `bot.AgentTools` exposes `shopping_needs`, shop links, `record_delivery`, `request_checks` and `notify_owner`. See [agent-integration.md](agent-integration.md).
 
-Per-item forecasts are evaluated at an agent-chosen moment without cross-item input; `min_units_to_cover` is a derived minimum, never a stored target. Deliveries are exact additions keyed by order, idempotent, and rejected when newer evidence exists. Agent-initiated questions and messages are an explicit exception to the common slot, capped at 10 messages per local day. Tests cover protocol rules, authentication, idempotency, double-count protection, item independence and configuration; four new seeded faults have named witnesses.
+Per-item forecasts are evaluated at an agent-chosen moment without cross-item input; `min_units_to_cover` is a derived minimum and `units_to_full_set` a derived cart size up to the explicit full set plus reserve; neither is a stored target. Deliveries are exact additions keyed by order, idempotent, and rejected when newer evidence exists. Agent-initiated questions and messages are an explicit exception to the common slot, capped at 10 messages per local day. Tests cover protocol rules, authentication, idempotency, double-count protection, item independence and configuration; four new seeded faults have named witnesses.
 
 Live on 2026-10-24: the bot runs on a server as a systemd user service with real Telegram; a Claude Code session reaches hoarder through the SSH stdio bridge (`deploy/mcp-stdio.py`) and Knuspr through OAuth, with Knuspr checkout, order and account tools denied by client permissions. Only reads were exercised.
 

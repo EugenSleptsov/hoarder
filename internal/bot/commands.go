@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"time"
 
@@ -105,6 +106,7 @@ func (s *Service) beginCheck(ctx context.Context, tx *sqlstore.Tx, id string, bo
 	if e != nil {
 		return e
 	}
+	d.Scale = int(math.Ceil(current.Config.FullSet() + current.Config.ReserveUnits))
 	return s.saveNewDialog(ctx, tx, d, messageID, now)
 }
 
@@ -134,6 +136,10 @@ func (s *Service) finish(ctx context.Context, tx *sqlstore.Tx, v *screen, now ti
 			reserve = 1
 		}
 		cfg := item.Config{ID: d.ItemID, Name: d.Name, WithReserve: d.WithReserve, ReserveUnits: reserve, LeadDays: 3, MaxCheckDays: 90}
+		if d.SetUnits > 1 {
+			cfg.ReserveUnits = float64(d.ReserveUnits)
+			cfg = cfg.WithFullSet(float64(d.SetUnits))
+		}
 		state, e = item.New(cfg, item.Interval{Low: d.Low, High: d.High}, item.Interval{Low: .5 / d.DurationDays, High: 1.5 / d.DurationDays}, d.ObservedAt)
 		if e == nil {
 			e = tx.CreateItem(ctx, state)

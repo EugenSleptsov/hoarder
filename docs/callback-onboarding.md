@@ -34,9 +34,11 @@ Names already used by an item, archived ones included, are not offered. The owne
 
 After a name, `NewQuick` starts:
 
-1. Reserve policy: fixed zero or one package.
-2. Current stock: common presets or the detailed closed/open-package form.
+1. Reserve policy: fixed zero or one package, or «Много упаковок» for a full set of 2–24 packages and a reserve of 0–24 on top of it.
+2. Current stock: common presets or the detailed closed/open-package form. With a set the presets are the full set, set plus reserve and about half the set, each up to an eighth of a package open.
 3. Review and explicit Add confirmation.
+
+The detailed form pages closed counts up to 99: small items keep the worded 0–3 buttons, larger sets get a first page that covers the set plus reserve, «Больше»/«Меньше» page further. Paging is a transition of its own and records no count.
 
 The common path takes three button taps after the name. Current-stock choices are available regardless of reserve policy: choosing reserve does not silently select an extra package. A user can go Back, edit stock or optionally provide a usual package duration before saving. With no duration hint, the review discloses a 30-day cold-start assumption and the existing broad rate range. This is not measured consumption.
 
@@ -52,7 +54,7 @@ A persisted `runtime/adding` queue holds only the onboarding workflow. It does n
 
 ## Persistence compatibility
 
-Schema v3 is a reader fence for new dialog steps, adding queues, message ownership and markup-only delivery. Opening v1/v2 as the correct owner upgrades the marker transactionally without rewriting item events, projections or receipt hashes. Existing old wizards remain readable. Prior binaries refuse v3 rather than misinterpreting new steps or resurrecting old buttons.
+Schema v3 is a reader fence for new dialog steps, adding queues, message ownership and markup-only delivery. Opening v1/v2 as the correct owner upgrades the marker transactionally without rewriting item events, projections or receipt hashes. Existing old wizards remain readable. Prior binaries refuse v3 rather than misinterpreting new steps or resurrecting old buttons. Schema v4 (2026-10-25) fences the set-size steps, paged counts and the item's full set the same way.
 
 Make a consistent pre-upgrade backup with the previous binary. Do not lower `user_version`; rollback uses the previous binary and a separate pre-upgrade snapshot. See `running.md`.
 

@@ -168,6 +168,21 @@ Renaming and hidden `/add` shortcuts added five required mutations, again writte
 
 The full 37-change campaign ran locally on Windows 11 amd64 with scoop GCC (`python -X utf8`): 36 required faults were detected by their named witnesses, and M28 survived as disclosed. These cases protect the new paths against regression. They do not measure independently how good the tests are. No CI run on this change is claimed here.
 
+## Full set, larger reserve and paged counts (2026-10-25)
+
+The full set, reserves up to 24 buttons/99 in the domain, paged closed counts and the schema v4 fence added six required mutations with their witnesses:
+
+| ID | Change | Witness |
+|---|---|---|
+| M38 | Size the cart only up to the reserve, ignoring the full set | `TestFullSetSizesTheShoppingAmountWithoutResettingStock` |
+| M39 | Let the full set move the question date | `TestFullSetSizesPurchasesButNeverMovesTheQuestion` |
+| M40 | Store one package as an explicit full set | `TestFullSetIsAWholeExplicitPolicyAndOnePackageStaysImplicit` |
+| M41 | Let schema-v3 binaries open full sets | `TestV3MigrationKeepsLegacyConfigurationsAndReplaysFullSets` |
+| M42 | Stop closed-package counts at the first page | `TestStockChecksCountManyClosedPackages` |
+| M43 | Accept a fractional full set | `TestFullSetIsAWholeExplicitPolicyAndOnePackageStaysImplicit` |
+
+The full 43-change campaign ran locally on the final sources (Windows 11 amd64, scoop GCC, `python -X utf8`): 42 required faults were detected by their named witnesses, and M28 survived as disclosed. As before, this is regression evidence for the new paths, not an independent measure of test quality, and no CI run is claimed.
+
 ## Remaining uncertainty
 
 These are selected mutations, not a whole-program operator sweep, and the new cases were chosen after inspecting the initial survivors. Detection of these faults is concrete regression evidence, not independent statistical validation of all tests. A passing scenario proves neither production availability nor the usefulness of a forecast to a household.

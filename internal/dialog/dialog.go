@@ -52,6 +52,72 @@ type State struct {
 	Unknown         bool      `json:"unknown"`
 	Unused          bool      `json:"unused"`
 	Cancelled       bool      `json:"cancelled"`
+	// SetUnits and ReserveUnits are sizes chosen while adding; zero SetUnits
+	// means one package with the yes/no reserve. Scale (full set plus reserve)
+	// only sizes the count buttons and ClosedPage pages them; neither is evidence.
+	SetUnits     int `json:"set_units,omitempty"`
+	ReserveUnits int `json:"reserve_units,omitempty"`
+	Scale        int `json:"scale,omitempty"`
+	ClosedPage   int `json:"closed_page,omitempty"`
+}
+
+// MaxClosed bounds one closed-package count answer.
+const MaxClosed = 99
+
+// countRange is the page of closed counts shown: four worded ones for small
+// items, a larger first page for big sets, then twelve per further page.
+func (s State) countRange() (from, to int) {
+	first := 4
+	if s.Scale > 2 {
+		first = min(24, ((s.Scale+2)/4+1)*4)
+	}
+	if s.ClosedPage > 0 {
+		from = first + (s.ClosedPage-1)*12
+		return from, min(MaxClosed, from+11)
+	}
+	return 0, first - 1
+}
+
+func (s State) countButtons() [][]Button {
+	from, to := s.countRange()
+	var rows [][]Button
+	if from == 0 && to == 3 {
+		rows = [][]Button{{{"Нет", "c0"}, {"Одна", "c1"}}, {{"Две", "c2"}, {"Три", "c3"}}}
+	} else {
+		for n := from; n <= to; n++ {
+			if (n-from)%4 == 0 {
+				rows = append(rows, nil)
+			}
+			rows[len(rows)-1] = append(rows[len(rows)-1], Button{strconv.Itoa(n), "c" + strconv.Itoa(n)})
+		}
+	}
+	var paging []Button
+	if s.ClosedPage > 0 {
+		paging = append(paging, Button{fmt.Sprintf("Меньше %d", from), "cless"})
+	}
+	if to < MaxClosed {
+		paging = append(paging, Button{fmt.Sprintf("Больше %d", to), "cmore"})
+	}
+	if paging != nil {
+		rows = append(rows, paging)
+	}
+	return rows
+}
+
+// applyCount pages or records one closed-package count. ok is false for paging.
+func (s State) applyCount(n State, action string, now time.Time) (State, bool) {
+	switch action {
+	case "cmore":
+		n.ClosedPage++
+		return n, false
+	case "cless":
+		n.ClosedPage--
+		return n, false
+	}
+	n.ClosedUnits, _ = strconv.Atoi(action[1:])
+	n.ClosedAt = now
+	n.ClosedPage = 0
+	return n, true
 }
 
 func New(id, itemID, name string, creating, reserve bool, revision uint64, history, since time.Time) (State, error) {
@@ -94,7 +160,7 @@ func (s State) Buttons() [][]Button {
 	case Duration:
 		rows = [][]Button{{{"Около недели", "d7"}, {"Около месяца", "d30"}}, {{"Около 3 месяцев", "d90"}, {"Не знаю", "du"}}}
 	case Closed:
-		rows = [][]Button{{{"Нет", "c0"}, {"Одна", "c1"}}, {{"Две", "c2"}, {"Три", "c3"}}}
+		rows = s.countButtons()
 	case Level:
 		rows = [][]Button{{{"Полная", "p100"}, {"75%", "p75"}}, {{"50%", "p50"}, {"25%", "p25"}}, {{"Пусто", "p0"}}}
 	case History:
@@ -127,7 +193,7 @@ func (s State) Text() string {
 	case Duration:
 		return prefix + "На сколько обычно хватает одной стандартной упаковки? Это только начальное предположение."
 	case Closed:
-		return prefix + "Сколько сейчас закрытых стандартных упаковок? Открытую пока не считайте. Если больше трёх, отмените: такой ввод пока не поддерживается."
+		return prefix + "Сколько сейчас закрытых стандартных упаковок? Открытую пока не считайте. Если их больше, чем на кнопках, нажмите «Больше»."
 	case Level:
 		return prefix + "Сколько сейчас осталось в открытой стандартной упаковке? Если открытой нет — «Пусто». Несколько открытых упаковок пока не поддерживаются."
 	case History:
@@ -206,10 +272,10 @@ func (s State) Apply(generation uint64, action string, now time.Time) (State, er
 		}
 		n.Step = Closed
 	case Closed:
-		count, _ := strconv.Atoi(action[1:])
-		n.ClosedUnits = count
-		n.ClosedAt = now
-		n.Step = Level
+		var counted bool
+		if n, counted = s.applyCount(n, action, now); counted {
+			n.Step = Level
+		}
 	case Level:
 		if s.ClosedAt.IsZero() || now.Before(s.ClosedAt) || now.Sub(s.ClosedAt) > 15*time.Minute {
 			n.Step = Closed

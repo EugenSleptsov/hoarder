@@ -74,6 +74,8 @@ The reserve serves as leeway between ordinary replenishment and total exhaustion
 
 The deadline is absolute and anchored to evidence. Re-running a scheduler tomorrow must not transform 'check in ten days' into a fresh ten-day delay. Explicit unknowns must not indefinitely reset the evidence gap.
 
+An explicit full set `F` (default one package) does not enter the forecast or the question date. It only sizes a recommendation: the smallest whole addition `a` after which the projected central stock at the delivery moment reaches `F+B`, never less than the minimum that clears the recommendation. A delivery still adds exactly `[a,a]`.
+
 The baseline returns `check_replenishment` when an already-due item's central stock estimate is at/below the reserve boundary, or exhaustion before replenishment is plausible. This means ask/verify, not add a confirmed purchase or issue an order. A durable application must maintain an open purchase intent and schedule its confirmation separately so the same recommendation is not recreated each day.
 
 ## Mapping to the daily window

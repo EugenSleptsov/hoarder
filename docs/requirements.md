@@ -30,6 +30,7 @@ Prediction is the primary mechanism. A physical reserve is **leeway for predicti
 - Closed reserve quantity: approximate unopened units physically present.
 - Total quantity: active plus closed. More than one active package is possible; a UI may ask for a combined rough estimate.
 - Reserve policy: disabled or a fixed buffer quantity. A boolean with a default one-package reserve is sufficient for onboarding; configuration may express another fixed size.
+- Full set (owner decision 2026-10-25): an explicit number of packages that should be in use after replenishment, on top of the reserve; one package by default. It sizes a recommendation (buy up to full set plus reserve) and never changes stock, question timing or the reserve.
 - Replenishment boundary: estimated moment a reserve starts being consumed, or, without reserve, the moment to act before total depletion accounting for response/shopping lead time.
 - Exhaustion boundary: estimated moment total usable stock runs out. These two boundaries must not be conflated.
 - Forecast uncertainty: epistemic uncertainty from coarse/missing observations and possible demand changes. Do not label heuristic intervals as calibrated probabilities.

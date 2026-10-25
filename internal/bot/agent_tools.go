@@ -51,7 +51,8 @@ func (s *Service) AgentTools(clock func() time.Time) []mcp.Tool {
 			Name: "shopping_needs",
 			Description: "List active items with their own forecast evaluated now and at a future moment (for example the next delivery). " +
 				"needed_by_until uses the same rule as the bot's shopping list. min_units_to_cover is the smallest whole number of the item's units " +
-				"after which it would no longer be recommended at that moment; it is a minimum, not a stock target. Links map items to shop products.",
+				"after which it would no longer be recommended at that moment. units_to_full_set is what to buy: enough units for the projected stock at that moment " +
+				"to reach the item's full set plus its reserve, never less than the minimum. Neither is a stock target or an order. Links map items to shop products.",
 			InputSchema: json.RawMessage(`{"type":"object","properties":{
 "until":{"type":"string","format":"date-time","description":"RFC 3339 moment to evaluate, e.g. the delivery after next"},
 "horizon_days":{"type":"number","minimum":0,"maximum":60,"description":"Alternative to until: days from now"},

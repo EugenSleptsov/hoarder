@@ -331,5 +331,59 @@
     "after": "false && other.Config.ID != state.Config.ID && strings.EqualFold(other.Config.Name, text)",
     "required": true,
     "witness": "TestRenameRejectsTakenAndInvalidNamesUntilCancelled"
+  },
+  {
+    "id": "M38",
+    "title": "Size the cart only up to the reserve, ignoring the full set",
+    "path": "internal/bot/agent.go",
+    "before": "target := state.Config.FullSet() + state.Config.ReserveUnits",
+    "after": "target := state.Config.ReserveUnits",
+    "required": true,
+    "witness": "TestFullSetSizesTheShoppingAmountWithoutResettingStock"
+  },
+  {
+    "id": "M39",
+    "title": "Let the full set move the question date",
+    "path": "internal/forecast/baseline.go",
+    "before": "targetDays := math.Max(0, (s.Stock.Mid()-s.Config.ReserveUnits)/s.Rate.Mid())",
+    "after": "targetDays := math.Max(0, (s.Stock.Mid()-s.Config.ReserveUnits-s.Config.FullSet()+1)/s.Rate.Mid())",
+    "required": true,
+    "witness": "TestFullSetSizesPurchasesButNeverMovesTheQuestion"
+  },
+  {
+    "id": "M40",
+    "title": "Store one package as an explicit full set",
+    "path": "internal/item/item.go",
+    "before": "if n == 1 {",
+    "after": "if false {",
+    "required": true,
+    "witness": "TestFullSetIsAWholeExplicitPolicyAndOnePackageStaysImplicit"
+  },
+  {
+    "id": "M41",
+    "title": "Let schema-v3 binaries open full sets",
+    "path": "internal/sqlstore/database.go",
+    "before": "if version < 4 {",
+    "after": "if version < 3 {",
+    "required": true,
+    "witness": "TestV3MigrationKeepsLegacyConfigurationsAndReplaysFullSets"
+  },
+  {
+    "id": "M42",
+    "title": "Stop closed-package counts at the first page",
+    "path": "internal/dialog/dialog.go",
+    "before": "if to < MaxClosed {",
+    "after": "if false && to < MaxClosed {",
+    "required": true,
+    "witness": "TestStockChecksCountManyClosedPackages"
+  },
+  {
+    "id": "M43",
+    "title": "Accept a fractional full set",
+    "path": "internal/item/item.go",
+    "before": "c.FullUnits != math.Trunc(c.FullUnits)",
+    "after": "false",
+    "required": true,
+    "witness": "TestFullSetIsAWholeExplicitPolicyAndOnePackageStaysImplicit"
   }
 ]
