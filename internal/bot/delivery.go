@@ -38,7 +38,7 @@ func (s *Service) queue(ctx context.Context, tx *sqlstore.Tx, id string, now tim
 		return err
 	}
 	if v.MessageID > 0 {
-		if err := tx.Put(ctx, "message_screen", messageKey(v.MessageID), id); err != nil {
+		if err := tx.Put(ctx, "message_screen", messageKey(v.ChatID, v.MessageID), id); err != nil {
 			return err
 		}
 	}
@@ -62,6 +62,8 @@ func (s *Service) window(now time.Time) (string, bool, error) {
 
 // Tick reads persisted dates, never re-plans overdue items. One digest includes
 // every due item; pagination is presentation, never a competing-item budget.
+// Each family member with daily questions on gets the same digest in their own
+// chat; who receives it never changes which items are due.
 func (s *Service) Tick(ctx context.Context, now time.Time) error {
 	date, allowed, e := s.window(now)
 	if e != nil || !allowed {
@@ -86,11 +88,20 @@ func (s *Service) Tick(ctx context.Context, now time.Time) error {
 		if e = tx.Insert(ctx, "session", date, session{date, ids, now}); e != nil {
 			return e
 		}
-		id, e := s.menuScreen(ctx, tx, "due", 0, ids, 0, now)
+		chats, e := s.recipients(ctx, tx)
 		if e != nil {
 			return e
 		}
-		return s.queue(ctx, tx, id, now, true, date)
+		for _, chat := range chats {
+			id, e := s.menuScreen(ctx, tx, "due", 0, ids, place{Chat: chat}, now)
+			if e != nil {
+				return e
+			}
+			if e = s.queue(ctx, tx, id, now, true, date); e != nil {
+				return e
+			}
+		}
+		return nil
 	})
 }
 
@@ -148,6 +159,17 @@ func (s *Service) Flush(ctx context.Context, api Messenger, now time.Time) error
 			if !job.ClearOnly && (v.Used || !now.Before(v.ExpiresAt)) {
 				skip = true
 			}
+			// Buttons and questions go only to a current member; a removed
+			// member still gets old keyboards cleared.
+			if !skip && !job.ClearOnly && v.ChatID != 0 && (len(v.Actions) > 0 || v.Dialog != nil) {
+				var m member
+				err := tx.Get(ctx, "member", chatKey(v.ChatID), &m)
+				if errors.Is(err, sqlstore.ErrNotFound) {
+					skip = true
+				} else if err != nil {
+					return err
+				}
+			}
 			if job.Proactive {
 				date, allowed, err := s.window(now)
 				if err != nil {
@@ -183,10 +205,10 @@ func (s *Service) Flush(ctx context.Context, api Messenger, now time.Time) error
 		if skip {
 			continue
 		}
-		text := render(v, s.db.Owner())
+		text := render(v, s.to(v.ChatID))
 		var sent telegram.Message
 		if job.ClearOnly {
-			e = api.ClearKeyboard(ctx, s.db.Owner(), v.MessageID)
+			e = api.ClearKeyboard(ctx, s.to(v.ChatID), v.MessageID)
 		} else if v.MessageID == 0 {
 			sent, e = api.Send(ctx, text)
 		} else {
@@ -285,7 +307,7 @@ func (s *Service) Flush(ctx context.Context, api Messenger, now time.Time) error
 			}
 			if !current {
 				var currentID string
-				if err = tx.Get(ctx, "message_screen", messageKey(latest.MessageID), &currentID); errors.Is(err, sqlstore.ErrNotFound) {
+				if err = tx.Get(ctx, "message_screen", messageKey(latest.ChatID, latest.MessageID), &currentID); errors.Is(err, sqlstore.ErrNotFound) {
 					// Ambiguous legacy screens: do not guess a keyboard to restore.
 					return tx.Delete(ctx, "delivery", v.ID)
 				} else if err != nil {
@@ -297,7 +319,7 @@ func (s *Service) Flush(ctx context.Context, api Messenger, now time.Time) error
 				return tx.Delete(ctx, "delivery", v.ID)
 			}
 			if latest.MessageID > 0 {
-				if err = tx.Put(ctx, "message_screen", messageKey(latest.MessageID), latest.ID); err != nil {
+				if err = tx.Put(ctx, "message_screen", messageKey(latest.ChatID, latest.MessageID), latest.ID); err != nil {
 					return err
 				}
 			}

@@ -22,12 +22,12 @@ func configurationText(c item.Config) string {
 	return fmt.Sprintf("Полный набор: %g уп.\nРезерв: %g уп.\nВремя на покупку: %g дн.\nМаксимальный интервал проверки: %g дн.", c.FullSet(), c.ReserveUnits, c.LeadDays, c.MaxCheckDays)
 }
 
-func (s *Service) managementCard(ctx context.Context, tx *sqlstore.Tx, state item.State, messageID int64, now time.Time) error {
-	return s.managementCardWith(ctx, tx, state, "", messageID, now)
+func (s *Service) managementCard(ctx context.Context, tx *sqlstore.Tx, state item.State, at place, now time.Time) error {
+	return s.managementCardWith(ctx, tx, state, "", at, now)
 }
 
 // managementCardWith puts lead above the card: a text reply has no callback toast.
-func (s *Service) managementCardWith(ctx context.Context, tx *sqlstore.Tx, state item.State, lead string, messageID int64, now time.Time) error {
+func (s *Service) managementCardWith(ctx context.Context, tx *sqlstore.Tx, state item.State, lead string, at place, now time.Time) error {
 	status := "Опросы включены"
 	if state.Paused {
 		status = "Пауза: расход по прогнозу продолжается"
@@ -66,10 +66,10 @@ func (s *Service) managementCardWith(ctx context.Context, tx *sqlstore.Tx, state
 		actions = append(actions, itemAction("Убрать в архив", "archive_preview", state))
 	}
 	actions = append(actions, action{Label: "Все предметы", Kind: "view", View: "all"}, action{Label: "Архив", Kind: "view", View: "archive"})
-	return s.note(ctx, tx, text, actions, messageID, now)
+	return s.note(ctx, tx, text, actions, at, now)
 }
 
-func (s *Service) managementCallback(ctx context.Context, tx *sqlstore.Tx, a action, commandID string, messageID int64, now time.Time) (string, error) {
+func (s *Service) managementCallback(ctx context.Context, tx *sqlstore.Tx, a action, commandID string, at place, now time.Time) (string, error) {
 	state, err := tx.LoadItem(ctx, a.ItemID)
 	if errors.Is(err, sqlstore.ErrNotFound) {
 		return "Предмет недоступен. Откройте /items.", nil
@@ -81,7 +81,7 @@ func (s *Service) managementCallback(ctx context.Context, tx *sqlstore.Tx, a act
 		return "Предмет изменён. Откройте /manage.", nil
 	}
 	if a.Kind == "manage" {
-		return "", s.managementCard(ctx, tx, state, messageID, now)
+		return "", s.managementCard(ctx, tx, state, at, now)
 	}
 	if state.Archived && !(a.Kind == "control" && a.Control == item.Restore) {
 		return "Предмет в архиве. Откройте /archive.", nil
@@ -95,11 +95,11 @@ func (s *Service) managementCallback(ctx context.Context, tx *sqlstore.Tx, a act
 			actions = append(actions, b)
 		}
 		actions = append(actions, itemAction("Назад к предмету", "manage", state))
-		return "", s.note(ctx, tx, state.Config.Name+"\n\n"+configurationText(state.Config), actions, messageID, now)
+		return "", s.note(ctx, tx, state.Config.Name+"\n\n"+configurationText(state.Config), actions, at, now)
 	case "setting":
-		return "", s.settingChoices(ctx, tx, state, a.Field, messageID, now)
+		return "", s.settingChoices(ctx, tx, state, a.Field, at, now)
 	case "rename":
-		return "", s.beginRename(ctx, tx, state, messageID, now)
+		return "", s.beginRename(ctx, tx, state, at, now)
 	case "config_preview":
 		if a.Configuration == nil || a.Configuration.ID != state.Config.ID || a.Configuration.Validate() != nil {
 			return "Некорректные настройки.", nil
@@ -107,18 +107,18 @@ func (s *Service) managementCallback(ctx context.Context, tx *sqlstore.Tx, a act
 		confirm := itemAction("Сохранить настройки", "control", state)
 		confirm.Control, confirm.Configuration = item.Reconfigure, a.Configuration
 		text := state.Config.Name + "\n\nБыло:\n" + configurationText(state.Config) + "\n\nБудет:\n" + configurationText(*a.Configuration) + "\n\nФизический запас не изменится. Пересчитается только план этого предмета."
-		return "", s.note(ctx, tx, text, []action{confirm, itemAction("Отмена", "manage", state)}, messageID, now)
+		return "", s.note(ctx, tx, text, []action{confirm, itemAction("Отмена", "manage", state)}, at, now)
 	case "archive_preview":
 		confirm := itemAction("Подтверждаю архивирование", "control", state)
 		confirm.Control = item.Archive
-		return "", s.note(ctx, tx, state.Config.Name+"\n\nУбрать предмет из реестра и опросов? История останется в базе. Восстановление доступно через /archive. Это не безвозвратное удаление данных.", []action{confirm, itemAction("Отмена", "manage", state)}, messageID, now)
+		return "", s.note(ctx, tx, state.Config.Name+"\n\nУбрать предмет из реестра и опросов? История останется в базе. Восстановление доступно через /archive. Это не безвозвратное удаление данных.", []action{confirm, itemAction("Отмена", "manage", state)}, at, now)
 	case "control":
-		return s.applyControl(ctx, tx, state, a, commandID, messageID, now)
+		return s.applyControl(ctx, tx, state, a, commandID, at, now)
 	}
 	return "Некорректная кнопка.", nil
 }
 
-func (s *Service) settingChoices(ctx context.Context, tx *sqlstore.Tx, state item.State, field string, messageID int64, now time.Time) error {
+func (s *Service) settingChoices(ctx context.Context, tx *sqlstore.Tx, state item.State, field string, at place, now time.Time) error {
 	var values []float64
 	switch field {
 	case "full":
@@ -169,10 +169,10 @@ func (s *Service) settingChoices(ctx context.Context, tx *sqlstore.Tx, state ite
 	case "reserve":
 		text += "\nРезерв — сколько упаковок не трогать на случай ошибки прогноза. Он не растёт автоматически."
 	}
-	return s.note(ctx, tx, text, actions, messageID, now)
+	return s.note(ctx, tx, text, actions, at, now)
 }
 
-func (s *Service) applyControl(ctx context.Context, tx *sqlstore.Tx, state item.State, a action, commandID string, messageID int64, now time.Time) (string, error) {
+func (s *Service) applyControl(ctx context.Context, tx *sqlstore.Tx, state item.State, a action, commandID string, at place, now time.Time) (string, error) {
 	switch a.Control {
 	case item.Pause, item.Resume, item.Archive, item.Restore, item.Reconfigure:
 	default:
@@ -184,7 +184,7 @@ func (s *Service) applyControl(ctx context.Context, tx *sqlstore.Tx, state item.
 		return "Действие больше недоступно. Откройте /manage.", nil
 	}
 	if a.Control == item.Reconfigure && *a.Configuration == state.Config {
-		return "Настройки не изменились.", s.managementCard(ctx, tx, state, messageID, now)
+		return "Настройки не изменились.", s.managementCard(ctx, tx, state, at, now)
 	}
 	next, err := tx.ApplyEvent(ctx, event, state.Revision)
 	if err != nil {
@@ -215,7 +215,7 @@ func (s *Service) applyControl(ctx context.Context, tx *sqlstore.Tx, state item.
 	if err = s.invalidateQuestion(ctx, tx, state.Config.ID, now); err != nil {
 		return "", err
 	}
-	return "Изменение сохранено.", s.managementCard(ctx, tx, next, messageID, now)
+	return "Изменение сохранено.", s.managementCard(ctx, tx, next, at, now)
 }
 
 func (s *Service) invalidateQuestion(ctx context.Context, tx *sqlstore.Tx, id string, now time.Time) error {
@@ -308,7 +308,7 @@ func (s *Service) refreshPending(ctx context.Context, tx *sqlstore.Tx, v *screen
 	if len(current) == 0 {
 		return true, nil
 	}
-	id, err := s.menuScreen(ctx, tx, "due", 0, current, v.MessageID, now)
+	id, err := s.menuScreen(ctx, tx, "due", 0, current, v.at(), now)
 	if err != nil {
 		return false, err
 	}

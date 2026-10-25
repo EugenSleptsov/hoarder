@@ -34,7 +34,7 @@ Schema v2 keeps the existing table layout but fences out older binaries that do 
 
 ## Callback and delivery safety
 
-Management actions are server-side and bound to an opaque screen, allowed action, owner, source message and expected item revision. Old settings, archive confirmations and stock answers cannot overwrite newer state. Each accepted menu action consumes its screen. A lifecycle/configuration change invalidates an unfinished stock dialog for that item.
+Management actions are server-side and bound to an opaque screen, allowed action, sender (the owner or a family member), the screen's chat, source message and expected item revision. Members manage items exactly like the owner. Old settings, archive confirmations and stock answers cannot overwrite newer state. Each accepted menu action consumes its screen. A lifecycle/configuration change invalidates an unfinished stock dialog for that item.
 
 Previously built page IDs are only candidates; presentation is filtered against each item's current state. Immediately before proactive delivery, an inactive or no-longer-due item is removed. If no items remain, the pending digest is cancelled. If actions change, a new opaque screen is queued: old callback indices are never rebound to different items. Remaining eligible items keep their own plan dates and no global cap is introduced.
 

@@ -89,6 +89,8 @@ func TestAdversarialDaemonPollingResetsAcknowledgedCursor(t *testing.T) {
 					}
 				} else if strings.HasSuffix(r.URL.Path, "/sendMessage") {
 					result = telegram.Message{ID: 55, Date: 2, Chat: telegram.Chat{ID: 123, Type: "private"}}
+				} else if strings.HasSuffix(r.URL.Path, "/getMe") {
+					result = map[string]any{"id": 1, "is_bot": true, "username": "hoarder_test_bot"}
 				} else {
 					t.Errorf("unexpected method %s", r.URL.Path)
 					cancel()

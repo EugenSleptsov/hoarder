@@ -19,6 +19,8 @@ var (
 	ErrTransport = errors.New("telegram transport failed")
 	ErrProtocol  = errors.New("invalid Telegram response")
 	tokenPattern = regexp.MustCompile(`^[0-9]+:[A-Za-z0-9_-]+$`)
+	// usernamePattern is a Telegram bot username without the leading @.
+	usernamePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{3,31}$`)
 )
 
 type Client struct {
@@ -43,7 +45,33 @@ func newClient(token, base string, transport *http.Client) (*Client, error) {
 type Chat struct {
 	ID   int64  `json:"id"`
 	Type string `json:"type"`
+	// name is display-only. It stays unexported so marshalled updates, and
+	// the receipt hashes stored for them before names existed, are unchanged.
+	name string
 }
+
+// Name is the private chat's display name, empty when Telegram sent none.
+func (c Chat) Name() string { return c.name }
+
+func (c *Chat) UnmarshalJSON(b []byte) error {
+	var raw struct {
+		ID        int64  `json:"id"`
+		Type      string `json:"type"`
+		FirstName string `json:"first_name"`
+		LastName  string `json:"last_name"`
+		Username  string `json:"username"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	name := strings.TrimSpace(raw.FirstName + " " + raw.LastName)
+	if name == "" && raw.Username != "" {
+		name = "@" + raw.Username
+	}
+	*c = Chat{ID: raw.ID, Type: raw.Type, name: name}
+	return nil
+}
+
 type User struct {
 	ID int64 `json:"id"`
 }
@@ -95,6 +123,20 @@ func (c *Client) Updates(ctx context.Context, offset int64) ([]Update, error) {
 	var result []Update
 	err := c.call(ctx, "getUpdates", map[string]any{"offset": offset, "limit": 20, "timeout": 30, "allowed_updates": []string{"message", "callback_query"}}, &result)
 	return result, err
+}
+
+// Username asks Telegram for the bot's own @username; invitation links need it.
+func (c *Client) Username(ctx context.Context) (string, error) {
+	var me struct {
+		Username string `json:"username"`
+	}
+	if err := c.call(ctx, "getMe", struct{}{}, &me); err != nil {
+		return "", err
+	}
+	if !usernamePattern.MatchString(me.Username) {
+		return "", ErrProtocol
+	}
+	return me.Username, nil
 }
 
 func (c *Client) Send(ctx context.Context, text Text) (Message, error) {

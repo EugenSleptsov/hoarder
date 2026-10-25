@@ -1,6 +1,6 @@
 # Implementation roadmap
 
-Status: 2026-10-25. `cmd/hoarder` is a runnable single-owner Telegram bot with SQLite, inline callbacks, independent saved plans, daily delivery, item management (including renaming, full sets and larger reserves) and an optional MCP endpoint for an external shopping agent. This is an initial implementation, not a production-readiness or forecast-accuracy claim.
+Status: 2026-10-25. `cmd/hoarder` is a runnable Telegram bot for one household (an owner plus invited family members in their own private chats) with SQLite, inline callbacks, independent saved plans, daily delivery, item management (including renaming, full sets and larger reserves) and an optional MCP endpoint for an external shopping agent. This is an initial implementation, not a production-readiness or forecast-accuracy claim.
 
 ## Invariants
 
@@ -12,7 +12,7 @@ SQLite persists original item states, immutable events, projections, revisions a
 
 The physical tables are `metadata`, `items`, `events` and generic typed-JSON `records`. Plans, screens, sessions, intents, jobs and runtime receipts use `records`; conceptual tables in the original architecture are not all separate SQL tables. Workflow relations are transactionally checked by the service.
 
-Schema v3 adds a reader compatibility fence for lifecycle/configuration events, quick onboarding, adding queues and markup-only delivery. Schema v4 fences full sets and paged counts. Owner-checked migration preserves historical payloads and receipt hashes; prior binaries must refuse v4. Normalization, indexes, retention and larger migration fixtures remain future work.
+Schema v3 adds a reader compatibility fence for lifecycle/configuration events, quick onboarding, adding queues and markup-only delivery. Schema v4 fences full sets and paged counts. Schema v5 fences per-chat screens, message keys and text input of family members. Owner-checked migration preserves historical payloads and receipt hashes; prior binaries must refuse v5. Normalization, indexes, retention and larger migration fixtures remain future work.
 
 ## H002 — Independent plans and lifecycle: implemented initial slice
 
@@ -42,13 +42,15 @@ Terminal stock/onboarding/cancel answers now leave keyboard-free receipts. Inter
 
 Quick onboarding offers name shortcuts, reserve, stock presets and explicit confirmation; duration is optional and its default disclosed. Multi-line lists up to 20 names are validated/deduplicated and confirmed per item. `/add` resumes; `/cancel` abandons the remaining queue. Old wizards remain readable. See [callback-onboarding.md](callback-onboarding.md).
 
-## H004 — Callback conversations: implemented for one owner
+## H004 — Callback conversations: implemented for one household
 
 Onboarding uses name shortcuts or text, inline reserve and stock choices, optional duration and explicit confirmation. Existing checks distinguish unknown, confirmed household non-use and purchase-history clarification. Unknown-time purchases cause current snapshots rather than fake additions. Partial checks expire after 15 minutes rather than silently mixing old and new quantities.
 
 Management uses `/manage` and `/archive` plus inline controls. Settings preview old/new values and archive has a confirmation step. Expected item revisions protect both stock observations and management actions. Callback/update receipts and polling offset persist with durable decisions. Tests cover repeated, stale, concurrent and unauthorised callbacks, restart, failed edits and message-scope checks.
 
-Pending: multiple household members/group chats, several open packages in one answer, corrections and interaction-burden metrics. Current input supports up to 99 closed packages and one open package and may require several taps; it is not zero-effort tracking.
+Family access (decision 2026-10-25): the owner issues one-time invitation links (24 hours, at most 5 open and 10 members) from `/family`; an invited person uses the same shared items from their own private chat. Screens, Telegram message keys and pending text input are scoped per chat; callbacks are checked against the sender and the screen's chat. Each person turns their own daily digest on or off; the selection and dates of due items stay per item. The newest open question for an item wins in every chat, and a stale list button in another chat re-renders the current list. Only the owner invites, revokes and removes; a removed member loses access and buttons at once, and their keyboards are cleared. Agent messages go to the owner only. Tests cover sharing, per-chat message IDs and input, one-time/expired/revoked invitations, removal, forged callbacks, per-person digests across DST and restart, and agent routing; sixteen new seeded faults have named witnesses.
+
+Pending: group chats, several open packages in one answer, corrections and interaction-burden metrics. Current input supports up to 99 closed packages and one open package and may require several taps; it is not zero-effort tracking.
 
 ## Adversarial audit — implemented repairs
 
@@ -60,7 +62,7 @@ Validated environment or token-file configuration, owner-bound database, gracefu
 
 CI checks module integrity and formatting, runs vet/race tests, builds the bot and runs the offline simulation. An optional short-lived source-bundle workflow makes tracked code plus checksum-verified vendored dependencies available for offline development. It contains no live inventory or credentials and is not deployment packaging.
 
-A systemd user unit (`deploy/hoarder.service`) exists, and since 2026-10-24 one owner deployment runs with live Telegram. No household-pilot results exist yet.
+A systemd user unit (`deploy/hoarder.service`) exists, and since 2026-10-24 one owner deployment runs with live Telegram. Family access has not been exercised live. No household-pilot results exist yet.
 
 Pending: health endpoint, container packaging, backup scheduling/retention, error diagnostics and broader failure tests.
 

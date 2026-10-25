@@ -41,8 +41,8 @@ func (s *Service) Handle(ctx context.Context, u telegram.Update, now time.Time) 
 		err = nil
 		if u.Callback != nil {
 			notice, err = s.callback(ctx, tx, *u.Callback, now)
-		} else if u.Message != nil && u.Message.Chat.ID == s.db.Owner() && u.Message.Chat.Type == "private" {
-			err = s.command(ctx, tx, u.Message.Text, now)
+		} else if u.Message != nil {
+			err = s.message(ctx, tx, *u.Message, now)
 		}
 		if err != nil {
 			return err

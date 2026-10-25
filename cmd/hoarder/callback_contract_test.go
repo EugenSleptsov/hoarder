@@ -108,6 +108,8 @@ func exerciseDaemonCallbacks(t *testing.T, failCommit, failAck bool) {
 			}
 			poll++
 			result = []telegram.Update{current}
+		case strings.HasSuffix(r.URL.Path, "/getMe"):
+			result = map[string]any{"id": 1, "is_bot": true, "username": "hoarder_test_bot"}
 		case strings.HasSuffix(r.URL.Path, "/answerCallbackQuery"):
 			var ack struct {
 				ID        string `json:"callback_query_id"`

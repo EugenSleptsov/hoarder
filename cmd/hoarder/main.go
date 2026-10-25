@@ -159,6 +159,15 @@ func run(ctx context.Context, c config, backup string) error {
 	if e != nil {
 		return e
 	}
+	// Invitation links need the bot's @username. Without it the bot still
+	// runs, and invitations show a /start code to send instead.
+	meCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	name, e := api.Username(meCtx)
+	cancel()
+	if e != nil {
+		slog.Warn("bot username unavailable; invitations show a code instead of a link", "error", e)
+	}
+	s.SetUsername(name)
 	if c.MCPAddr != "" {
 		stop, err := serveMCP(ctx, c.MCPAddr, c.MCPToken, s)
 		if err != nil {

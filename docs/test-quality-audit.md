@@ -16,7 +16,7 @@ This audit changes tests, test tooling and CI, not the normal production Go code
 | Independent forecasts and fixed reserve | Deterministic regression scenarios; cross-item cap injection is detected | Does not establish practical accuracy or low interaction burden |
 | Forecast learning and seasons | Non-seasonal `interval-baseline-v1`; numeric contracts now tested more precisely | Seasonal learning, calibrated probabilities, pilot and comparison with fixed reminders are not implemented/validated |
 | Operations | Backup command, migrations, shutdown, selected retry and race tests | Deployment packaging, health endpoint, backup/record retention and failed-job diagnostics remain incomplete |
-| Interface breadth | Button onboarding, pause/archive/settings | Shared schedule edits, richer quantities, renaming/corrections and multiple users remain pending |
+| Interface breadth | Button onboarding, pause/archive/settings, renaming, family members by invitation | Shared schedule edits, richer quantities, corrections and group chats remain pending |
 
 See [roadmap.md](roadmap.md). A functional first bot is not the same as a completed forecasting product or a production reliability certificate.
 
@@ -182,6 +182,31 @@ The full set, reserves up to 24 buttons/99 in the domain, paged closed counts an
 | M43 | Accept a fractional full set | `TestFullSetIsAWholeExplicitPolicyAndOnePackageStaysImplicit` |
 
 The full 43-change campaign ran locally on the final sources (Windows 11 amd64, scoop GCC, `python -X utf8`): 42 required faults were detected by their named witnesses, and M28 survived as disclosed. As before, this is regression evidence for the new paths, not an independent measure of test quality, and no CI run is claimed.
+
+## Family access (2026-10-25)
+
+Invitations, per-chat screens and input, per-person daily digests and the schema v5 fence added sixteen required mutations with their witnesses. M01 now targets the sender check in `internal/bot/family.go`, where the owner/member check moved; M41 now rewrites the v5 marker back to v3.
+
+| ID | Change | Witness |
+|---|---|---|
+| M44 | Let schema-v4 binaries open family data | `TestV4MigrationKeepsOwnerScreensAndRefusesNewerSchemas` |
+| M45 | Open a database from a newer schema | `TestV4MigrationKeepsOwnerScreensAndRefusesNewerSchemas` |
+| M46 | Keep access for a removed member | `TestRemovedMemberLosesAccessAndOldButtons` |
+| M47 | Let one invitation admit several people | `TestInvitationsAreOneTimeExpireAndOnlyTheOwnerIssuesThem` |
+| M48 | Accept an expired invitation | `TestInvitationsAreOneTimeExpireAndOnlyTheOwnerIssuesThem` |
+| M49 | Accept a revoked invitation | `TestInvitationsAreOneTimeExpireAndOnlyTheOwnerIssuesThem` |
+| M50 | Let a member issue invitations | `TestInvitationsAreOneTimeExpireAndOnlyTheOwnerIssuesThem` |
+| M51 | Answer a screen from another person's chat | `TestForgedCallbacksAnswerOnlyInTheirOwnChat` |
+| M52 | Key messages by ID alone across chats | `TestMessageIDsAreScopedPerChat` |
+| M53 | Share pending text input between chats | `TestPendingTextInputsBelongToTheirChat` |
+| M54 | Send a member's screens to the owner's chat | `TestInvitedMemberSharesTheHouseholdFromTheirOwnChat` |
+| M55 | Deliver buttons to a chat outside the family | `TestRemovedMemberLosesAccessAndOldButtons` |
+| M56 | Leave a removed member's keyboards live | `TestRemovedMemberLosesAccessAndOldButtons` |
+| M57 | Let an old confirmation remove a new membership | `TestRemovedMemberLosesAccessAndOldButtons` |
+| M58 | Send the daily digest to people who turned it off | `TestDailyQuestionsGoToEachMemberWhoWantsThem` |
+| M59 | Kill a digest when another person answered one of its items | `TestDailyQuestionsGoToEachMemberWhoWantsThem` |
+
+The full 59-change campaign ran locally (Windows 11 amd64, Go 1.26.1, scoop GCC, `python -X utf8`). 56 required faults were detected by their named witnesses and M28 survived as disclosed. M53 and M58 were first written so that the mutated source did not compile (an unused import and an unused variable); the runner reported them as invalid, not detected. After the cases were rewritten, a rerun of those two detected both, each failing only its witness. As before, this is regression evidence for the new paths, written together with them, not an independent measure of test quality, and no CI run is claimed.
 
 ## Remaining uncertainty
 

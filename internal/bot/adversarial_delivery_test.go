@@ -75,10 +75,10 @@ func TestAdversarialFloodCooldownCoversOtherJobsAndRestart(t *testing.T) {
 	h.command("/items")
 	// Independent non-domain UI jobs, both ready now.
 	if err := h.db.Transaction(testContext, func(tx *sqlstore.Tx) error {
-		if err := h.service.note(testContext, tx, "One", nil, 0, h.now); err != nil {
+		if err := h.service.note(testContext, tx, "One", nil, place{}, h.now); err != nil {
 			return err
 		}
-		return h.service.note(testContext, tx, "Two", nil, 0, h.now)
+		return h.service.note(testContext, tx, "Two", nil, place{}, h.now)
 	}); err != nil {
 		t.Fatal(err)
 	}

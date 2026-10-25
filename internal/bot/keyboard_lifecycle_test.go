@@ -140,7 +140,7 @@ func TestCleanupDoesNotEraseReplacementQueuedBeforeFlush(t *testing.T) {
 		if err := h.service.retireScreen(testContext, tx, v, h.now); err != nil {
 			return err
 		}
-		return h.service.menu(testContext, tx, "all", 0, nil, msg.MessageID, h.now)
+		return h.service.menu(testContext, tx, "all", 0, nil, place{Message: msg.MessageID}, h.now)
 	}); err != nil {
 		t.Fatal(err)
 	}

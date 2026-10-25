@@ -30,6 +30,7 @@ type Service struct {
 	db       *sqlstore.DB
 	daily    schedule.Daily
 	cfg      Config
+	username string     // The bot's @username for invitation links; may be empty.
 	delivery sync.Mutex // One sender in this process; deploy one process per database.
 }
 
@@ -45,6 +46,7 @@ type action struct {
 	View             string
 	Page             int
 	IDs              []string
+	Member           int64 `json:",omitempty"`
 }
 
 type screen struct {
@@ -55,8 +57,24 @@ type screen struct {
 	Text      string
 	Actions   []action
 	MessageID int64
+	// ChatID is a family member's chat; zero, as on every older screen, is
+	// the owner's.
+	ChatID    int64 `json:",omitempty"`
 	ExpiresAt time.Time
 	Used      bool
+}
+
+// place is where a screen goes: a chat (zero for the owner's) and the message
+// it replaces, zero for a new message.
+type place struct{ Chat, Message int64 }
+
+func (p place) fresh() place { return place{Chat: p.Chat} }
+func (v screen) at() place   { return place{v.ChatID, v.MessageID} }
+func (s *Service) to(chat int64) int64 {
+	if chat == 0 {
+		return s.db.Owner()
+	}
+	return chat
 }
 
 type receipt struct{ Hash, Notice string }
@@ -107,7 +125,14 @@ func hash(v any) (string, error) {
 }
 
 func (s *Service) callback(ctx context.Context, tx *sqlstore.Tx, cb telegram.Callback, now time.Time) (string, error) {
-	if cb.ID == "" || cb.From.ID != s.db.Owner() || cb.Message == nil || cb.Message.ID <= 0 || cb.Message.Date == 0 || cb.Message.Chat.ID != s.db.Owner() || cb.Message.Chat.Type != "private" {
+	if cb.ID == "" || cb.Message == nil || cb.Message.ID <= 0 || cb.Message.Date == 0 {
+		return "Нет доступа к этому вопросу.", nil
+	}
+	chat, allowed, e := s.sender(ctx, tx, cb.Message.Chat, cb.From.ID)
+	if e != nil {
+		return "", e
+	}
+	if !allowed {
 		return "Нет доступа к этому вопросу.", nil
 	}
 	digest, e := hash(cb)
@@ -125,14 +150,14 @@ func (s *Service) callback(ctx context.Context, tx *sqlstore.Tx, cb telegram.Cal
 	if !errors.Is(e, sqlstore.ErrNotFound) {
 		return "", e
 	}
-	notice, e := s.routeCallback(ctx, tx, cb, now)
+	notice, e := s.routeCallback(ctx, tx, cb, chat, now)
 	if e != nil {
 		return "", e
 	}
 	return notice, tx.Insert(ctx, "callback", cb.ID, receipt{digest, notice})
 }
 
-func (s *Service) routeCallback(ctx context.Context, tx *sqlstore.Tx, cb telegram.Callback, now time.Time) (string, error) {
+func (s *Service) routeCallback(ctx context.Context, tx *sqlstore.Tx, cb telegram.Callback, chat int64, now time.Time) (string, error) {
 	parts := strings.Split(cb.Data, ":")
 	if len(cb.Data) > 64 || len(parts) < 3 {
 		return "Некорректная кнопка.", nil
@@ -164,6 +189,10 @@ func (s *Service) routeCallback(ctx context.Context, tx *sqlstore.Tx, cb telegra
 	if e != nil {
 		return "", e
 	}
+	// Screen IDs are secret, but a screen still answers only in its own chat.
+	if v.ChatID != chat {
+		return "Кнопка устарела. Откройте /items.", nil
+	}
 	if v.MessageID != 0 && v.MessageID != cb.Message.ID {
 		return "Кнопка устарела. Откройте /items.", nil
 	}
@@ -189,9 +218,10 @@ func (s *Service) routeCallback(ctx context.Context, tx *sqlstore.Tx, cb telegra
 			return "", e
 		}
 		a := v.Actions[n]
+		at := v.at()
 		switch a.Kind {
 		case "manage", "settings", "setting", "config_preview", "archive_preview", "control", "rename":
-			notice, err := s.managementCallback(ctx, tx, a, v.ID, v.MessageID, now)
+			notice, err := s.managementCallback(ctx, tx, a, v.ID, at, now)
 			if err == nil && notice != "" {
 				err = s.retireScreen(ctx, tx, v, now)
 			}
@@ -203,26 +233,33 @@ func (s *Service) routeCallback(ctx context.Context, tx *sqlstore.Tx, cb telegra
 					return "", err
 				}
 				if current.Archived || current.Revision != a.ExpectedRevision {
+					// Someone may have answered from another chat: show the
+					// same list with current items rather than dead buttons.
+					if v.MenuView != "" {
+						return "Предмет уже изменён. Список обновлён.", s.menu(ctx, tx, v.MenuView, 0, v.MenuIDs, at, now)
+					}
 					return "Предмет изменён. Откройте /items.", s.retireScreen(ctx, tx, v, now)
 				}
 			}
-			return "", s.beginCheck(ctx, tx, a.ItemID, a.Kind == "bought", v.MessageID, now)
+			return "", s.beginCheck(ctx, tx, a.ItemID, a.Kind == "bought", at, now)
 		case "page":
-			return "", s.menu(ctx, tx, a.View, a.Page, a.IDs, v.MessageID, now)
+			return "", s.menu(ctx, tx, a.View, a.Page, a.IDs, at, now)
 		case "view":
-			return "", s.menu(ctx, tx, a.View, 0, nil, v.MessageID, now)
+			return "", s.menu(ctx, tx, a.View, 0, nil, at, now)
 		case "add":
-			return "", s.beginAdding(ctx, tx, v.MessageID, now)
+			return "", s.beginAdding(ctx, tx, at, now)
 		case "add_name":
-			return "", s.beginNames(ctx, tx, a.Field, v.MessageID, now)
+			return "", s.beginNames(ctx, tx, a.Field, at, now)
 		case "hide_menu":
-			return "", s.suggestionScreen(ctx, tx, v.MessageID, now)
+			return "", s.suggestionScreen(ctx, tx, at, now)
 		case "hide_name":
-			return "Подсказка скрыта.", s.hideSuggestion(ctx, tx, a.Field, v.MessageID, now)
+			return "Подсказка скрыта.", s.hideSuggestion(ctx, tx, a.Field, at, now)
 		case "show_names":
-			return "Подсказки возвращены.", s.showSuggestions(ctx, tx, a.View == "add", v.MessageID, now)
+			return "Подсказки возвращены.", s.showSuggestions(ctx, tx, a.View == "add", at, now)
 		case "cancel_add":
-			return "Отменено.", s.cancelAdding(ctx, tx, v.MessageID, now)
+			return "Отменено.", s.cancelAdding(ctx, tx, at, now)
+		case "family", "invite", "revoke", "quiet", "remove_preview", "remove":
+			return s.familyCallback(ctx, tx, a, at, now)
 		default:
 			return "Некорректная кнопка.", nil
 		}

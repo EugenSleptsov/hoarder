@@ -14,7 +14,7 @@ func TestAdversarialFloodCooldownExpiresWithoutChangingItems(t *testing.T) {
 	before := h.state("Паста")
 	plan := h.plan(before.Config.ID)
 	if err := h.db.Transaction(testContext, func(tx *sqlstore.Tx) error {
-		return h.service.note(testContext, tx, "Pending message", nil, 0, h.now)
+		return h.service.note(testContext, tx, "Pending message", nil, place{}, h.now)
 	}); err != nil {
 		t.Fatal(err)
 	}

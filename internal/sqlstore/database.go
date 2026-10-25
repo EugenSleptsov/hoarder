@@ -29,8 +29,9 @@ CREATE TRIGGER events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT
 CREATE TABLE records(kind TEXT NOT NULL, id TEXT NOT NULL, body BLOB NOT NULL, PRIMARY KEY(kind,id));
 PRAGMA user_version=1;`
 
-// DB is permanently bound to one explicitly configured private chat. A different
-// owner cannot accidentally open the same household database.
+// DB is permanently bound to one explicitly configured owner chat. A different
+// owner cannot accidentally open the same household database. Family members
+// the owner invites are records inside it, not other owners.
 type DB struct {
 	db    *sql.DB
 	owner int64
@@ -108,7 +109,7 @@ func Open(ctx context.Context, path string, owner int64) (*DB, error) {
 			if _, e := t.tx.ExecContext(ctx, "INSERT INTO metadata(key,value) VALUES('owner',?)", strconv.FormatInt(owner, 10)); e != nil {
 				return e
 			}
-		} else if version < 1 || version > 4 {
+		} else if version < 1 || version > 5 {
 			return errors.New("unsupported database schema version")
 		}
 		var stored string
@@ -121,10 +122,11 @@ func Open(ctx context.Context, path string, owner int64) (*DB, error) {
 		// Schema v3 fences earlier readers from new onboarding steps, adding
 		// queues and markup-only deliveries. Schema v4 fences readers that
 		// would drop a full set from configurations or misread paged counts.
-		// Legacy item/event bytes and receipt hashes remain unchanged; old
-		// dialogs still have a reader.
-		if version < 4 {
-			_, e := t.tx.ExecContext(ctx, "PRAGMA user_version=4")
+		// Schema v5 fences readers that would send a family member's screens
+		// to the owner's chat. Legacy item/event bytes and receipt hashes
+		// remain unchanged; old dialogs still have a reader.
+		if version < 5 {
+			_, e := t.tx.ExecContext(ctx, "PRAGMA user_version=5")
 			return e
 		}
 		return nil

@@ -2,9 +2,9 @@
   {
     "id": "M01",
     "title": "Accept callbacks from a foreign sender",
-    "path": "internal/bot/service.go",
-    "before": "cb.From.ID != s.db.Owner() || ",
-    "after": "",
+    "path": "internal/bot/family.go",
+    "before": "c.ID <= 0 || c.ID != user",
+    "after": "c.ID <= 0",
     "required": true,
     "witness": "TestDuplicateStaleAndUnauthorisedButtons"
   },
@@ -363,7 +363,7 @@
     "id": "M41",
     "title": "Let schema-v3 binaries open full sets",
     "path": "internal/sqlstore/database.go",
-    "before": "if version < 4 {",
+    "before": "if version < 5 {",
     "after": "if version < 3 {",
     "required": true,
     "witness": "TestV3MigrationKeepsLegacyConfigurationsAndReplaysFullSets"
@@ -385,5 +385,149 @@
     "after": "false",
     "required": true,
     "witness": "TestFullSetIsAWholeExplicitPolicyAndOnePackageStaysImplicit"
+  },
+  {
+    "id": "M44",
+    "title": "Let schema-v4 binaries open family data",
+    "path": "internal/sqlstore/database.go",
+    "before": "if version < 5 {",
+    "after": "if version < 4 {",
+    "required": true,
+    "witness": "TestV4MigrationKeepsOwnerScreensAndRefusesNewerSchemas"
+  },
+  {
+    "id": "M45",
+    "title": "Open a database from a newer schema",
+    "path": "internal/sqlstore/database.go",
+    "before": "version > 5 {",
+    "after": "version > 6 {",
+    "required": true,
+    "witness": "TestV4MigrationKeepsOwnerScreensAndRefusesNewerSchemas"
+  },
+  {
+    "id": "M46",
+    "title": "Keep access for a removed member",
+    "path": "internal/bot/family.go",
+    "before": "\t\treturn 0, false, nil\n\t}\n\treturn c.ID, err == nil, err",
+    "after": "\t\treturn c.ID, true, nil\n\t}\n\treturn c.ID, err == nil, err",
+    "required": true,
+    "witness": "TestRemovedMemberLosesAccessAndOldButtons"
+  },
+  {
+    "id": "M47",
+    "title": "Let one invitation admit several people",
+    "path": "internal/bot/family.go",
+    "before": "return in.UsedBy == 0 && !in.Revoked && ",
+    "after": "return !in.Revoked && ",
+    "required": true,
+    "witness": "TestInvitationsAreOneTimeExpireAndOnlyTheOwnerIssuesThem"
+  },
+  {
+    "id": "M48",
+    "title": "Accept an expired invitation",
+    "path": "internal/bot/family.go",
+    "before": "now.Before(in.ExpiresAt)",
+    "after": "true",
+    "required": true,
+    "witness": "TestInvitationsAreOneTimeExpireAndOnlyTheOwnerIssuesThem"
+  },
+  {
+    "id": "M49",
+    "title": "Accept a revoked invitation",
+    "path": "internal/bot/family.go",
+    "before": "!in.Revoked && ",
+    "after": "",
+    "required": true,
+    "witness": "TestInvitationsAreOneTimeExpireAndOnlyTheOwnerIssuesThem"
+  },
+  {
+    "id": "M50",
+    "title": "Let a member issue invitations",
+    "path": "internal/bot/family.go",
+    "before": "if at.Chat != 0 {",
+    "after": "if false {",
+    "required": true,
+    "witness": "TestInvitationsAreOneTimeExpireAndOnlyTheOwnerIssuesThem"
+  },
+  {
+    "id": "M51",
+    "title": "Answer a screen from another person's chat",
+    "path": "internal/bot/service.go",
+    "before": "if v.ChatID != chat {",
+    "after": "if false {",
+    "required": true,
+    "witness": "TestForgedCallbacksAnswerOnlyInTheirOwnChat"
+  },
+  {
+    "id": "M52",
+    "title": "Key messages by ID alone across chats",
+    "path": "internal/bot/screens.go",
+    "before": "return strconv.FormatInt(chat, 10) + \":\" + strconv.FormatInt(id, 10)",
+    "after": "return strconv.FormatInt(id, 10)",
+    "required": true,
+    "witness": "TestMessageIDsAreScopedPerChat"
+  },
+  {
+    "id": "M53",
+    "title": "Share pending text input between chats",
+    "path": "internal/bot/adding.go",
+    "before": "if chat == 0 {\n\t\treturn name\n\t}",
+    "after": "if true {\n\t\treturn name\n\t}",
+    "required": true,
+    "witness": "TestPendingTextInputsBelongToTheirChat"
+  },
+  {
+    "id": "M54",
+    "title": "Send a member's screens to the owner's chat",
+    "path": "internal/bot/delivery.go",
+    "before": "text := render(v, s.to(v.ChatID))",
+    "after": "text := render(v, s.db.Owner())",
+    "required": true,
+    "witness": "TestInvitedMemberSharesTheHouseholdFromTheirOwnChat"
+  },
+  {
+    "id": "M55",
+    "title": "Deliver buttons to a chat outside the family",
+    "path": "internal/bot/delivery.go",
+    "before": "if !skip && !job.ClearOnly && v.ChatID != 0 && (len(v.Actions) > 0 || v.Dialog != nil) {",
+    "after": "if false {",
+    "required": true,
+    "witness": "TestRemovedMemberLosesAccessAndOldButtons"
+  },
+  {
+    "id": "M56",
+    "title": "Leave a removed member's keyboards live",
+    "path": "internal/bot/family.go",
+    "before": "err = s.retireScreen(ctx, tx, v, now)",
+    "after": "err = nil",
+    "required": true,
+    "witness": "TestRemovedMemberLosesAccessAndOldButtons"
+  },
+  {
+    "id": "M57",
+    "title": "Let an old confirmation remove a new membership",
+    "path": "internal/bot/family.go",
+    "before": "m.Invite != a.Field",
+    "after": "false",
+    "required": true,
+    "witness": "TestRemovedMemberLosesAccessAndOldButtons"
+  },
+  {
+    "id": "M58",
+    "title": "Send the daily digest to people who turned it off",
+    "path": "internal/bot/family.go",
+    "before": "if !q {",
+    "after": "if _ = q; true {",
+    "required": true,
+    "witness": "TestDailyQuestionsGoToEachMemberWhoWantsThem"
+  },
+  {
+    "id": "M59",
+    "title": "Kill a digest when another person answered one of its items",
+    "path": "internal/bot/service.go",
+    "before": "if v.MenuView != \"\" {",
+    "after": "if false {",
+    "required": true,
+    "witness": "TestDailyQuestionsGoToEachMemberWhoWantsThem"
   }
 ]

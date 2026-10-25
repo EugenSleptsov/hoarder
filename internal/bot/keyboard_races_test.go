@@ -88,7 +88,7 @@ func TestInflightCleanupReconcilesNewerKeyboard(t *testing.T) {
 	}
 	m := &interleavedMessenger{Messenger: h.api, onClear: func() {
 		if err := h.db.Transaction(testContext, func(tx *sqlstore.Tx) error {
-			return h.service.menu(testContext, tx, "all", 0, nil, old.MessageID, h.now)
+			return h.service.menu(testContext, tx, "all", 0, nil, place{Message: old.MessageID}, h.now)
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -112,7 +112,7 @@ func TestLegacyObsoleteScreenCannotClearReplacementWithoutLedger(t *testing.T) {
 	h.process(old)
 	fresh := h.wire.snapshot()
 	if err := h.db.Transaction(testContext, func(tx *sqlstore.Tx) error {
-		return tx.Delete(testContext, "message_screen", messageKey(fresh.MessageID))
+		return tx.Delete(testContext, "message_screen", messageKey(fresh.ChatID, fresh.MessageID))
 	}); err != nil {
 		t.Fatal(err)
 	}

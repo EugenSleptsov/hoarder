@@ -1,6 +1,6 @@
 # Telegram interaction design
 
-Status: application flow specification. The repository's HTTP adapter does not yet implement these conversations or persist sessions.
+Status: application flow specification. `cmd/hoarder` implements most of it: see `README.md` and `roadmap.md` for actual status, including family access by invitation (2026-10-25).
 
 ## Principle
 
@@ -67,7 +67,7 @@ No response creates no stock event at all. Store delivery/response status separa
 
 A question binds to household, item, session, expected revision and valid actions. Validate all of these server-side. Use an opaque compact identifier in callback data, not a trusted arbitrary item ID from the client.
 
-After another member has already answered, old buttons return `Этот вопрос уже обновлён` rather than overwrite the newer state. Double taps return the previous result without another quantity addition. A newer question can supersede the old question; the older message must not remain an active mutation path.
+After another member has already answered, old buttons return `Этот вопрос уже обновлён` rather than overwrite the newer state; a stale item button in a list re-renders the current list instead. Each member has a private chat with the bot, and a question opened in one chat closes the same item's open question in another. Double taps return the previous result without another quantity addition. A newer question can supersede the old question; the older message must not remain an active mutation path.
 
 A delayed reply normally describes current observed state. The application must supply its actual observation time, not the original notification time. User-supplied historical corrections require event replay rather than appending old physical changes after current state.
 

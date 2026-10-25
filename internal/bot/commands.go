@@ -14,48 +14,57 @@ import (
 	"github.com/EugenSleptsov/hoarder/internal/sqlstore"
 )
 
-func (s *Service) command(ctx context.Context, tx *sqlstore.Tx, text string, now time.Time) error {
+// command handles text from the owner or a family member in their own chat.
+// Pending text inputs belong to that chat only.
+func (s *Service) command(ctx context.Context, tx *sqlstore.Tx, chat int64, text string, now time.Time) error {
 	text = strings.TrimSpace(text)
-	r, prompt, renaming, e := s.activeRename(ctx, tx)
+	at := place{Chat: chat}
+	r, prompt, renaming, e := s.activeRename(ctx, tx, chat)
 	if e != nil {
 		return e
 	}
 	if renaming {
 		if !strings.HasPrefix(text, "/") {
-			return s.finishRename(ctx, tx, r, prompt, text, now)
+			return s.finishRename(ctx, tx, chat, r, prompt, text, now)
 		}
 		// Any command closes the prompt, so a later message is never taken as a name.
-		if e = s.dropRename(ctx, tx, now); e != nil {
+		if e = s.dropRename(ctx, tx, chat, now); e != nil {
 			return e
 		}
 		if text == "/cancel" {
-			return s.note(ctx, tx, "Переименование отменено, название прежнее.", nil, 0, now)
+			return s.note(ctx, tx, "Переименование отменено, название прежнее.", nil, at, now)
 		}
 	}
+	if code, found := strings.CutPrefix(text, "/start "); found {
+		return s.knownInvite(ctx, tx, at, strings.TrimSpace(code), now)
+	}
 	if text == "/start" || text == "/items" {
-		return s.menu(ctx, tx, "all", 0, nil, 0, now)
+		return s.menu(ctx, tx, "all", 0, nil, at, now)
 	}
 	if text == "/manage" {
-		return s.menu(ctx, tx, "manage", 0, nil, 0, now)
+		return s.menu(ctx, tx, "manage", 0, nil, at, now)
 	}
 	if text == "/archive" {
-		return s.menu(ctx, tx, "archive", 0, nil, 0, now)
+		return s.menu(ctx, tx, "archive", 0, nil, at, now)
 	}
 	if text == "/today" {
-		return s.menu(ctx, tx, "due", 0, nil, 0, now)
+		return s.menu(ctx, tx, "due", 0, nil, at, now)
 	}
 	if text == "/shopping" {
-		return s.menu(ctx, tx, "shop", 0, nil, 0, now)
+		return s.menu(ctx, tx, "shop", 0, nil, at, now)
+	}
+	if text == "/family" {
+		return s.familyScreen(ctx, tx, at, "", now)
 	}
 	if text == "/cancel" {
-		return s.cancelAdding(ctx, tx, 0, now)
+		return s.cancelAdding(ctx, tx, at, now)
 	}
 	name := ""
 	if strings.HasPrefix(text, "/add ") {
 		name = strings.TrimSpace(strings.TrimPrefix(text, "/add "))
 	} else {
 		var awaiting bool
-		e := tx.Get(ctx, "runtime", "awaiting_name", &awaiting)
+		e := tx.Get(ctx, "runtime", inputKey("awaiting_name", chat), &awaiting)
 		if e != nil && !errors.Is(e, sqlstore.ErrNotFound) {
 			return e
 		}
@@ -64,19 +73,21 @@ func (s *Service) command(ctx context.Context, tx *sqlstore.Tx, text string, now
 		}
 	}
 	if text == "/add" {
-		return s.beginAdding(ctx, tx, 0, now)
+		return s.beginAdding(ctx, tx, at, now)
 	}
 	if name == "" {
-		return s.note(ctx, tx, "Команды: /items, /today, /shopping, /add, /manage, /archive. Ответы — кнопками.", nil, 0, now)
+		return s.note(ctx, tx, "Команды: /items, /today, /shopping, /add, /manage, /archive, /family. Ответы — кнопками.", nil, at, now)
 	}
-	return s.beginNames(ctx, tx, name, 0, now)
+	return s.beginNames(ctx, tx, name, at, now)
 }
 
-func (s *Service) saveNewDialog(ctx context.Context, tx *sqlstore.Tx, d dialog.State, messageID int64, now time.Time) error {
+// saveNewDialog makes d the item's only open question. A question already open
+// for the item, in any chat, is retired: the newest one wins.
+func (s *Service) saveNewDialog(ctx context.Context, tx *sqlstore.Tx, d dialog.State, at place, now time.Time) error {
 	if err := s.invalidateQuestion(ctx, tx, d.ItemID, now); err != nil {
 		return err
 	}
-	v := screen{ID: d.ID, Dialog: &d, MessageID: messageID, ExpiresAt: now.Add(7 * 24 * time.Hour)}
+	v := screen{ID: d.ID, Dialog: &d, MessageID: at.Message, ChatID: at.Chat, ExpiresAt: now.Add(7 * 24 * time.Hour)}
 	if e := tx.Insert(ctx, "screen", v.ID, v); e != nil {
 		return e
 	}
@@ -85,13 +96,13 @@ func (s *Service) saveNewDialog(ctx context.Context, tx *sqlstore.Tx, d dialog.S
 	}
 	return s.queue(ctx, tx, v.ID, now, false, "")
 }
-func (s *Service) beginCheck(ctx context.Context, tx *sqlstore.Tx, id string, bought bool, messageID int64, now time.Time) error {
+func (s *Service) beginCheck(ctx context.Context, tx *sqlstore.Tx, id string, bought bool, at place, now time.Time) error {
 	current, e := tx.LoadItem(ctx, id)
 	if e != nil {
 		return e
 	}
 	if current.Archived {
-		return s.note(ctx, tx, "Предмет в архиве. Восстановите его через /archive.", nil, messageID, now)
+		return s.note(ctx, tx, "Предмет в архиве. Восстановите его через /archive.", nil, at, now)
 	}
 	dialogID, e := opaqueID()
 	if e != nil {
@@ -107,7 +118,7 @@ func (s *Service) beginCheck(ctx context.Context, tx *sqlstore.Tx, id string, bo
 		return e
 	}
 	d.Scale = int(math.Ceil(current.Config.FullSet() + current.Config.ReserveUnits))
-	return s.saveNewDialog(ctx, tx, d, messageID, now)
+	return s.saveNewDialog(ctx, tx, d, at, now)
 }
 
 func (s *Service) finish(ctx context.Context, tx *sqlstore.Tx, v *screen, now time.Time) error {
@@ -195,12 +206,12 @@ func (s *Service) Offset(ctx context.Context) (int64, error) {
 	return n, e
 }
 
-func (s *Service) note(ctx context.Context, tx *sqlstore.Tx, text string, actions []action, messageID int64, now time.Time) error {
+func (s *Service) note(ctx context.Context, tx *sqlstore.Tx, text string, actions []action, at place, now time.Time) error {
 	id, e := opaqueID()
 	if e != nil {
 		return e
 	}
-	v := screen{ID: id, Text: text, Actions: actions, MessageID: messageID, ExpiresAt: now.Add(7 * 24 * time.Hour)}
+	v := screen{ID: id, Text: text, Actions: actions, MessageID: at.Message, ChatID: at.Chat, ExpiresAt: now.Add(7 * 24 * time.Hour)}
 	if e = tx.Insert(ctx, "screen", id, v); e != nil {
 		return e
 	}

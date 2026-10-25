@@ -109,7 +109,7 @@ Use opaque, short server-side question IDs plus a version and selected action. B
 
 Repeated taps: return the previous result without adding another purchase/observation. Old buttons: acknowledge and explain that the question was superseded; never overwrite newer state. A callback answer is required to end Telegram's client-side progress indication; an answer is not itself a committed stock update.
 
-Use a configured allowlist, not 'the first user who sends /start becomes owner'. Token from an environment variable or secret file, never committed configuration. An exported sample file contains no chat-specific stock observations.
+Use a configured allowlist, not 'the first user who sends /start becomes owner'. The configured owner extends it explicitly with one-time, expiring invitations; a member is identified by their private chat, and every callback must come from the chat its screen was sent to. Token from an environment variable or secret file, never committed configuration. An exported sample file contains no chat-specific stock observations.
 
 ## 8. Cold start, seasons and shocks
 

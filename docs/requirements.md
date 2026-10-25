@@ -70,7 +70,7 @@ Strict independence means there is no guarantee of a small maximum number of que
 
 ## Persistence, security and operations
 
-Persist item settings, immutable observations, forecasts with algorithm version, scheduled question state, purchase intent, delivery state and Telegram update cursor. Never commit bot tokens or household observations. Restrict access to an explicitly configured chat; validate callback ownership, freshness and version. Back up the database; support replay/inspection before adopting a more complex predictor.
+Persist item settings, immutable observations, forecasts with algorithm version, scheduled question state, purchase intent, delivery state and Telegram update cursor. Never commit bot tokens or household observations. Restrict access to an explicitly configured owner chat and to family members the owner invited; validate callback sender, chat, freshness and version. Back up the database; support replay/inspection before adopting a more complex predictor.
 
 A database transaction cannot atomically include an external Telegram request. Delivery guarantees and crash windows must be documented; do not claim exactly-once messages where the API does not supply that property.
 
@@ -96,6 +96,15 @@ Synthetic scenarios are regression tests, not evidence of real-world forecast ac
 ## Initial scope and exclusions
 
 Start with one household and ordinary non-perishable consumables. No medical-critical stock guarantees, perishable expiry modelling, automatic ordering, receipt/email/calendar integrations, LLM dependency, cross-item learning, or automatic reserve optimisation. These are explicit scope boundaries rather than silently implemented assumptions.
+
+## Family access (decision 2026-10-25)
+
+One household database is shared by the family. The configured owner invites other people with one-time links that expire after 24 hours; each member uses the bot from their own private chat. Group chats are not supported.
+
+- Members see and change the same items with the same commands. Who answered does not change any item's forecast or question date.
+- Each person decides only whether they receive the daily digest. The set of due items is the same for everyone.
+- Only the owner invites, revokes open invitations and removes members. Removal ends access immediately and keeps the household's history.
+- Messages from the external shopping agent go to the owner only.
 
 ## External shopping agent (decision 2026-10-24)
 

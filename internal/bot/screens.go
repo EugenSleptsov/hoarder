@@ -10,7 +10,15 @@ import (
 	"github.com/EugenSleptsov/hoarder/internal/sqlstore"
 )
 
-func messageKey(id int64) string { return strconv.FormatInt(id, 10) }
+// messageKey names one Telegram message. Message IDs are unique only within a
+// chat, so a member's key carries the chat; the owner's keys keep their
+// original chat-less form.
+func messageKey(chat, id int64) string {
+	if chat == 0 {
+		return strconv.FormatInt(id, 10)
+	}
+	return strconv.FormatInt(chat, 10) + ":" + strconv.FormatInt(id, 10)
+}
 
 // ownsMessage distinguishes an obsolete screen from a fresh keyboard that has
 // already replaced it IN THE SAME Telegram message. Missing entries are legacy
@@ -20,7 +28,7 @@ func (s *Service) ownsMessage(ctx context.Context, tx *sqlstore.Tx, v screen) (b
 		return true, nil
 	}
 	var current string
-	err := tx.Get(ctx, "message_screen", messageKey(v.MessageID), &current)
+	err := tx.Get(ctx, "message_screen", messageKey(v.ChatID, v.MessageID), &current)
 	if errors.Is(err, sqlstore.ErrNotFound) {
 		// Before message ledgers existed a used menu could share its message
 		// with a newer screen. Adopt only an unambiguous live successor.
@@ -34,7 +42,7 @@ func (s *Service) ownsMessage(ctx context.Context, tx *sqlstore.Tx, v screen) (b
 			if e = json.Unmarshal(raw, &other); e != nil {
 				return false, e
 			}
-			if other.MessageID != v.MessageID || other.Used {
+			if other.ChatID != v.ChatID || other.MessageID != v.MessageID || other.Used {
 				continue
 			}
 			if other.Dialog != nil && other.Dialog.Step != "done" {
@@ -58,7 +66,7 @@ func (s *Service) ownsMessage(ctx context.Context, tx *sqlstore.Tx, v screen) (b
 		if candidate == "" {
 			return true, nil
 		}
-		return candidate == v.ID, tx.Put(ctx, "message_screen", messageKey(v.MessageID), candidate)
+		return candidate == v.ID, tx.Put(ctx, "message_screen", messageKey(v.ChatID, v.MessageID), candidate)
 	}
 	return current == v.ID, err
 }

@@ -18,7 +18,7 @@ Navigation and settings screens remain interactive: replacing their old actions 
 
 `answerCallbackQuery` acknowledges the tap separately. It does not remove inline markup. `ClearKeyboard` calls `editMessageReplyMarkup` with an explicit empty array and no text. A not-modified error is successful reconciliation.
 
-The durable `message_screen` record binds a Telegram message to the current server screen. Cleanup checks that binding before sending. Legacy messages without a ledger adopt an unambiguous live screen; ambiguity must not be resolved by guessing which keyboard to erase.
+The durable `message_screen` record binds a Telegram message to the current server screen. Telegram message IDs count per chat, so a family member's record is keyed by chat and message ID; the owner keeps the original message-ID key. Cleanup checks that binding before sending. Legacy messages without a ledger adopt an unambiguous live screen; ambiguity must not be resolved by guessing which keyboard to erase.
 
 Retirement is transactional and immediately makes the callback invalid, even while Telegram is unavailable. Cleanup is a `delivery.ClearOnly` job using the existing retry/error policy. A retired screen cannot regain mutation authority through a delayed send. Completed duplicate taps may repair the stored receipt but never rerun item creation or stock reduction.
 
@@ -54,7 +54,7 @@ A persisted `runtime/adding` queue holds only the onboarding workflow. It does n
 
 ## Persistence compatibility
 
-Schema v3 is a reader fence for new dialog steps, adding queues, message ownership and markup-only delivery. Opening v1/v2 as the correct owner upgrades the marker transactionally without rewriting item events, projections or receipt hashes. Existing old wizards remain readable. Prior binaries refuse v3 rather than misinterpreting new steps or resurrecting old buttons. Schema v4 (2026-10-25) fences the set-size steps, paged counts and the item's full set the same way.
+Schema v3 is a reader fence for new dialog steps, adding queues, message ownership and markup-only delivery. Opening v1/v2 as the correct owner upgrades the marker transactionally without rewriting item events, projections or receipt hashes. Existing old wizards remain readable. Prior binaries refuse v3 rather than misinterpreting new steps or resurrecting old buttons. Schema v4 (2026-10-25) fences the set-size steps, paged counts and the item's full set the same way. Schema v5 fences family members' screens, message keys and per-chat pending input.
 
 Make a consistent pre-upgrade backup with the previous binary. Do not lower `user_version`; rollback uses the previous binary and a separate pre-upgrade snapshot. See `running.md`.
 

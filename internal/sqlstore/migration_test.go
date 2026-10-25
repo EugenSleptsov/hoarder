@@ -33,7 +33,7 @@ func TestV1MigrationPreservesLegacyEventsAndReceipts(t *testing.T) {
 	}
 	defer db.Close()
 	var version int
-	if err = db.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil || version != 4 {
+	if err = db.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil || version != 5 {
 		t.Fatal(version, err)
 	}
 	var actual string
@@ -76,7 +76,7 @@ func TestV2MigrationPreservesPendingDialogBytes(t *testing.T) {
 	}
 	defer reopened.Close()
 	var version int
-	if err = reopened.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil || version != 4 {
+	if err = reopened.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil || version != 5 {
 		t.Fatal(version, err)
 	}
 	var got string
@@ -107,7 +107,7 @@ func TestV3MigrationKeepsLegacyConfigurationsAndReplaysFullSets(t *testing.T) {
 	}
 	defer db.Close()
 	var version int
-	if err = db.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil || version != 4 {
+	if err = db.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil || version != 5 {
 		t.Fatal(version, err)
 	}
 	set := legacy.WithFullSet(4)
@@ -132,5 +132,46 @@ func TestV3MigrationKeepsLegacyConfigurationsAndReplaysFullSets(t *testing.T) {
 	var actual string
 	if err = db.db.QueryRowContext(ctx, "SELECT payload FROM events WHERE event_id='reconfigure-old'").Scan(&actual); err != nil || actual != payload {
 		t.Fatal("rewrote legacy event", err)
+	}
+}
+
+func TestV4MigrationKeepsOwnerScreensAndRefusesNewerSchemas(t *testing.T) {
+	db, path, _ := fixture(t)
+	screen := `{"ID":"owner-screen","Text":"Предметы","MessageID":101,"ExpiresAt":"2026-10-30T00:00:00Z","Used":false}`
+	for _, r := range [][2]string{{"screen", screen}, {"message_screen", `"owner-screen"`}} {
+		id := "owner-screen"
+		if r[0] == "message_screen" {
+			id = "101" // The owner's message keys keep their chat-less form.
+		}
+		if _, err := db.db.ExecContext(ctx, "INSERT INTO records(kind,id,body) VALUES(?,?,?)", r[0], id, r[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.db.ExecContext(ctx, "PRAGMA user_version=4"); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	db, err := Open(ctx, path, 123)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var version int
+	if err = db.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil || version != 5 {
+		t.Fatal(version, err)
+	}
+	var got, key string
+	if err = db.db.QueryRowContext(ctx, "SELECT body FROM records WHERE kind='screen' AND id='owner-screen'").Scan(&got); err != nil || got != screen {
+		t.Fatal("owner screen rewritten", err)
+	}
+	if err = db.db.QueryRowContext(ctx, "SELECT body FROM records WHERE kind='message_screen' AND id='101'").Scan(&key); err != nil || key != `"owner-screen"` {
+		t.Fatal("owner message key rewritten", err)
+	}
+	if _, err = db.db.ExecContext(ctx, "PRAGMA user_version=6"); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	if newer, err := Open(ctx, path, 123); err == nil {
+		newer.Close()
+		t.Fatal("a newer schema was opened")
 	}
 }

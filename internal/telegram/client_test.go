@@ -128,3 +128,45 @@ func TestInvalidPayloadAndOversizedResponse(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestChatNamesStayOutOfMarshalledUpdates(t *testing.T) {
+	raw := `{"update_id":7,"message":{"message_id":3,"date":1,"chat":{"id":456,"type":"private","first_name":"Мария","last_name":"Иванова","username":"maria"},"text":"/start x"}}`
+	var u Update
+	if err := json.Unmarshal([]byte(raw), &u); err != nil {
+		t.Fatal(err)
+	}
+	if c := u.Message.Chat; c.Name() != "Мария Иванова" || c.ID != 456 || c.Type != "private" {
+		t.Fatal(c, c.Name())
+	}
+	// Update receipts hash the marshalled update; a name must not change it.
+	got, err := json.Marshal(u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := json.Marshal(Update{ID: 7, Message: &Message{ID: 3, Date: 1, Chat: Chat{ID: 456, Type: "private"}, Text: "/start x"}})
+	if err != nil || string(got) != string(want) {
+		t.Fatal("a display name changed the marshalled update", string(got), err)
+	}
+	var handle Chat
+	if err = json.Unmarshal([]byte(`{"id":5,"type":"private","username":"petr"}`), &handle); err != nil || handle.Name() != "@petr" {
+		t.Fatal(handle.Name(), err)
+	}
+}
+
+func TestUsernameComesFromGetMe(t *testing.T) {
+	name := "hoarder_bot"
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/bot"+testToken+"/getMe" {
+			t.Error("bad request route", r.URL.Path)
+		}
+		io.WriteString(w, `{"ok":true,"result":{"id":1,"is_bot":true,"username":"`+name+`"}}`)
+	})
+	if got, err := c.Username(context.Background()); err != nil || got != "hoarder_bot" {
+		t.Fatal(got, err)
+	}
+	for _, name = range []string{"", "bad name", "x?start=1"} {
+		if got, err := c.Username(context.Background()); !errors.Is(err, ErrProtocol) {
+			t.Fatal("unusable username accepted", got, err)
+		}
+	}
+}

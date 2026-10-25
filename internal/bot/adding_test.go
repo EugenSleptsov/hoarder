@@ -156,7 +156,7 @@ func TestLegacyWizardStillFinishes(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		return h.service.saveNewDialog(testContext, tx, d, 0, h.now)
+		return h.service.saveNewDialog(testContext, tx, d, place{}, h.now)
 	}); err != nil {
 		t.Fatal(err)
 	}

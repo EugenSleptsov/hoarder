@@ -23,16 +23,23 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
+// wireKey names a message the way Telegram does: IDs count per chat.
+type wireKey struct{ chat, id int64 }
+
+// ownerChat is the harness household's owner.
+const ownerChat = 123
+
 type wire struct {
-	messages map[int64]telegram.Text
+	messages map[wireKey]telegram.Text
 	clears   int
 	mu       sync.Mutex
-	last     telegram.Text
+	last     map[int64]telegram.Text
 	sends    int
+	sent     map[int64]int
 	edits    int
 	acks     int
 	fail     bool
-	next     int64
+	next     map[int64]int64
 }
 
 func (w *wire) serve(rw http.ResponseWriter, r *http.Request) {
@@ -55,13 +62,20 @@ func (w *wire) serve(rw http.ResponseWriter, r *http.Request) {
 		rw.WriteHeader(400)
 		return
 	}
+	if w.messages == nil {
+		w.messages, w.last, w.sent, w.next = map[wireKey]telegram.Text{}, map[int64]telegram.Text{}, map[int64]int{}, map[int64]int64{}
+	}
 	if method == "sendMessage" {
 		w.sends++
-		w.next++
-		text.MessageID = w.next
+		w.sent[text.ChatID]++
+		if w.next[text.ChatID] == 0 {
+			w.next[text.ChatID] = 100
+		}
+		w.next[text.ChatID]++
+		text.MessageID = w.next[text.ChatID]
 	} else if method == "editMessageReplyMarkup" {
 		w.clears++
-		old := w.messages[text.MessageID]
+		old := w.messages[wireKey{text.ChatID, text.MessageID}]
 		text.Text = old.Text
 	} else if method == "editMessageText" {
 		w.edits++
@@ -69,17 +83,19 @@ func (w *wire) serve(rw http.ResponseWriter, r *http.Request) {
 		rw.WriteHeader(404)
 		return
 	}
-	if w.messages == nil {
-		w.messages = make(map[int64]telegram.Text)
-	}
-	w.messages[text.MessageID] = text
-	if text.MessageID >= w.last.MessageID {
-		w.last = text
+	w.messages[wireKey{text.ChatID, text.MessageID}] = text
+	if text.MessageID >= w.last[text.ChatID].MessageID {
+		w.last[text.ChatID] = text
 	}
 	msg := telegram.Message{ID: text.MessageID, Date: 1, Chat: telegram.Chat{ID: text.ChatID, Type: "private"}, Text: text.Text}
 	json.NewEncoder(rw).Encode(map[string]any{"ok": true, "result": msg})
 }
-func (w *wire) snapshot() telegram.Text { w.mu.Lock(); defer w.mu.Unlock(); return w.last }
+func (w *wire) snapshot() telegram.Text { return w.snapshotIn(ownerChat) }
+func (w *wire) snapshotIn(chat int64) telegram.Text {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.last[chat]
+}
 
 type harness struct {
 	t        *testing.T
@@ -97,7 +113,7 @@ var testSchedule = Config{Zone: "Europe/Berlin", Hour: 21, CatchUp: 30 * time.Mi
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
-	h := &harness{t: t, path: filepath.Join(t.TempDir(), "home.db"), now: time.Date(2026, 9, 15, 18, 0, 0, 0, time.UTC), wire: &wire{next: 100}}
+	h := &harness{t: t, path: filepath.Join(t.TempDir(), "home.db"), now: time.Date(2026, 9, 15, 18, 0, 0, 0, time.UTC), wire: &wire{}}
 	srv := httptest.NewServer(http.HandlerFunc(h.wire.serve))
 	t.Cleanup(srv.Close)
 	endpoint, e := url.Parse(srv.URL)
@@ -134,6 +150,7 @@ func (h *harness) reopen() {
 	if e != nil {
 		h.t.Fatal(e)
 	}
+	h.service.SetUsername("hoarder_test_bot")
 }
 func (h *harness) process(u telegram.Update) string {
 	h.t.Helper()
@@ -151,13 +168,18 @@ func (h *harness) process(u telegram.Update) string {
 	}
 	return notice
 }
-func (h *harness) command(text string) {
+func (h *harness) command(text string) { h.commandIn(ownerChat, text) }
+func (h *harness) commandIn(chat int64, text string) {
 	h.sequence++
-	h.process(telegram.Update{ID: h.sequence, Message: &telegram.Message{ID: h.sequence, Date: h.now.Unix(), Chat: telegram.Chat{ID: 123, Type: "private"}, Text: text}})
+	h.process(telegram.Update{ID: h.sequence, Message: &telegram.Message{ID: h.sequence, Date: h.now.Unix(), Chat: telegram.Chat{ID: chat, Type: "private"}, Text: text}})
 }
 func (h *harness) button(label string) telegram.Update {
 	h.t.Helper()
-	msg := h.wire.snapshot()
+	return h.buttonIn(ownerChat, label)
+}
+func (h *harness) buttonIn(chat int64, label string) telegram.Update {
+	h.t.Helper()
+	msg := h.wire.snapshotIn(chat)
 	data := ""
 	if msg.Keyboard != nil {
 		for _, row := range msg.Keyboard.Rows {
@@ -175,11 +197,15 @@ func (h *harness) button(label string) telegram.Update {
 		h.t.Fatal("oversized callback")
 	}
 	h.sequence++
-	return telegram.Update{ID: h.sequence, Callback: &telegram.Callback{ID: strconv.FormatInt(h.sequence, 10), From: telegram.User{ID: 123}, Message: &telegram.Message{ID: msg.MessageID, Date: h.now.Unix(), Chat: telegram.Chat{ID: 123, Type: "private"}, Text: msg.Text}, Data: data}}
+	return telegram.Update{ID: h.sequence, Callback: &telegram.Callback{ID: strconv.FormatInt(h.sequence, 10), From: telegram.User{ID: chat}, Message: &telegram.Message{ID: msg.MessageID, Date: h.now.Unix(), Chat: telegram.Chat{ID: chat, Type: "private"}, Text: msg.Text}, Data: data}}
 }
 func (h *harness) press(label string) telegram.Update {
 	h.t.Helper()
-	u := h.button(label)
+	return h.pressIn(ownerChat, label)
+}
+func (h *harness) pressIn(chat int64, label string) telegram.Update {
+	h.t.Helper()
+	u := h.buttonIn(chat, label)
 	h.process(u)
 	return u
 }
@@ -227,8 +253,10 @@ func (w *wire) editCount() int { w.mu.Lock(); defer w.mu.Unlock(); return w.edit
 func (w *wire) ackCount() int  { w.mu.Lock(); defer w.mu.Unlock(); return w.acks }
 func (w *wire) setFail(v bool) { w.mu.Lock(); defer w.mu.Unlock(); w.fail = v }
 
-func (w *wire) message(id int64) telegram.Text {
+func (w *wire) message(id int64) telegram.Text { return w.messageIn(ownerChat, id) }
+func (w *wire) messageIn(chat, id int64) telegram.Text {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.messages[id]
+	return w.messages[wireKey{chat, id}]
 }
+func (w *wire) sendsTo(chat int64) int { w.mu.Lock(); defer w.mu.Unlock(); return w.sent[chat] }

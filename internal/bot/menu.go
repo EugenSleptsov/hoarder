@@ -25,7 +25,7 @@ func navGroup(a action) string {
 	switch a.Kind {
 	case "page":
 		return "page"
-	case "add", "view", "hide_menu", "show_names", "cancel_add":
+	case "add", "view", "hide_menu", "show_names", "cancel_add", "family":
 		return "menu"
 	case "settings", "rename":
 		return "item"
@@ -35,14 +35,14 @@ func navGroup(a action) string {
 	return ""
 }
 
-func (s *Service) menu(ctx context.Context, tx *sqlstore.Tx, view string, page int, ids []string, messageID int64, now time.Time) error {
-	id, e := s.menuScreen(ctx, tx, view, page, ids, messageID, now)
+func (s *Service) menu(ctx context.Context, tx *sqlstore.Tx, view string, page int, ids []string, at place, now time.Time) error {
+	id, e := s.menuScreen(ctx, tx, view, page, ids, at, now)
 	if e != nil {
 		return e
 	}
 	return s.queue(ctx, tx, id, now, false, "")
 }
-func (s *Service) menuScreen(ctx context.Context, tx *sqlstore.Tx, view string, page int, ids []string, messageID int64, now time.Time) (string, error) {
+func (s *Service) menuScreen(ctx context.Context, tx *sqlstore.Tx, view string, page int, ids []string, at place, now time.Time) (string, error) {
 	var e error
 	if ids == nil {
 		ids, e = s.selectItems(ctx, tx, view, now)
@@ -114,7 +114,7 @@ func (s *Service) menuScreen(ctx context.Context, tx *sqlstore.Tx, view string, 
 		actions = append(actions, action{Label: "Управление предметами", Kind: "view", View: "manage"})
 	}
 	if view == "manage" {
-		actions = append(actions, action{Label: "Архив", Kind: "view", View: "archive"})
+		actions = append(actions, action{Label: "Архив", Kind: "view", View: "archive"}, action{Label: "Семья", Kind: "family"})
 	}
 	if view != "due" {
 		actions = append(actions, action{Label: "Вопросы на сегодня", Kind: "view", View: "due"})
@@ -129,7 +129,7 @@ func (s *Service) menuScreen(ctx context.Context, tx *sqlstore.Tx, view string, 
 	if e != nil {
 		return "", e
 	}
-	v := screen{MenuView: view, MenuIDs: ids, ID: id, Text: text, Actions: actions, MessageID: messageID, ExpiresAt: now.Add(7 * 24 * time.Hour)}
+	v := screen{MenuView: view, MenuIDs: ids, ID: id, Text: text, Actions: actions, MessageID: at.Message, ChatID: at.Chat, ExpiresAt: now.Add(7 * 24 * time.Hour)}
 	return id, tx.Insert(ctx, "screen", id, v)
 }
 
@@ -153,7 +153,7 @@ func shoppingLine(state item.State, now time.Time) (string, error) {
 	return fmt.Sprintf("%s: ≈%d уп., до %g (%s)", state.Config.Name, *n.UnitsToFullSet, state.Config.FullSet()+state.Config.ReserveUnits, policy), nil
 }
 
-func render(v screen, owner int64) telegram.Text {
+func render(v screen, chat int64) telegram.Text {
 	text := v.Text
 	rows := [][]telegram.Button{}
 	if v.Dialog != nil && v.Dialog.Step != dialog.Done {
@@ -176,5 +176,5 @@ func render(v screen, owner int64) telegram.Text {
 			rows = append(rows, []telegram.Button{b})
 		}
 	}
-	return telegram.Text{ChatID: owner, MessageID: v.MessageID, Text: text, Keyboard: &telegram.Keyboard{Rows: rows}}
+	return telegram.Text{ChatID: chat, MessageID: v.MessageID, Text: text, Keyboard: &telegram.Keyboard{Rows: rows}}
 }

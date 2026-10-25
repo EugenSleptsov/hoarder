@@ -457,8 +457,9 @@ type CheckResult struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-// RequestChecks asks the owner about selected items now, outside the daily
-// slot. The answer is an ordinary observation; the request itself is not.
+// RequestChecks asks the owner, in the owner's chat only, about selected items
+// now, outside the daily slot. The answer is an ordinary observation; the
+// request itself is not.
 func (s *Service) RequestChecks(ctx context.Context, ids []string, now time.Time) ([]CheckResult, error) {
 	if len(ids) == 0 || len(ids) > maxChecks {
 		return nil, RequestError("item_ids must contain 1-10 items")
@@ -483,7 +484,7 @@ func (s *Service) RequestChecks(ctx context.Context, ids []string, now time.Time
 			case state.Archived:
 				r.Reason = "item is archived"
 			default:
-				if err = s.beginCheck(ctx, tx, id, false, 0, now); err != nil {
+				if err = s.beginCheck(ctx, tx, id, false, place{}, now); err != nil {
 					return err
 				}
 				r.Status = "sent"
@@ -495,8 +496,8 @@ func (s *Service) RequestChecks(ctx context.Context, ids []string, now time.Time
 	return results, err
 }
 
-// NotifyOwner sends a plain message to the owner chat. A daily cap keeps a
-// looping agent from flooding the chat.
+// NotifyOwner sends a plain message to the owner chat, never to family
+// members. A daily cap keeps a looping agent from flooding the chat.
 func (s *Service) NotifyOwner(ctx context.Context, text string, now time.Time) error {
 	text = strings.TrimSpace(text)
 	if text == "" || utf8.RuneCountInString(text) > maxNoticeRunes {
@@ -518,6 +519,6 @@ func (s *Service) NotifyOwner(ctx context.Context, text string, now time.Time) e
 		if err = tx.Put(ctx, "agent_notice", date, sent+1); err != nil {
 			return err
 		}
-		return s.note(ctx, tx, text+"\n\n/shopping · /items", nil, 0, now)
+		return s.note(ctx, tx, text+"\n\n/shopping · /items", nil, place{}, now)
 	})
 }

@@ -244,7 +244,7 @@ func TestControlAndPlanRollBackTogether(t *testing.T) {
 	err := h.db.Transaction(testContext, func(tx *sqlstore.Tx) error {
 		a := itemAction("pause", "control", before)
 		a.Control = item.Pause
-		if _, err := h.service.applyControl(testContext, tx, before, a, "rollback", 0, h.now); err != nil {
+		if _, err := h.service.applyControl(testContext, tx, before, a, "rollback", place{}, h.now); err != nil {
 			return err
 		}
 		return boom

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -23,9 +24,18 @@ type addFlow struct {
 	Index    int
 }
 
-func loadAdding(ctx context.Context, tx *sqlstore.Tx) (addFlow, error) {
+// inputKey names a runtime record of one chat's pending text input. The
+// owner's keys keep their original names.
+func inputKey(name string, chat int64) string {
+	if chat == 0 {
+		return name
+	}
+	return name + ":" + strconv.FormatInt(chat, 10)
+}
+
+func loadAdding(ctx context.Context, tx *sqlstore.Tx, chat int64) (addFlow, error) {
 	var f addFlow
-	err := tx.Get(ctx, "runtime", "adding", &f)
+	err := tx.Get(ctx, "runtime", inputKey("adding", chat), &f)
 	if errors.Is(err, sqlstore.ErrNotFound) {
 		err = nil
 	}
@@ -103,17 +113,17 @@ func (s *Service) suggestions(ctx context.Context, tx *sqlstore.Tx) (visible, hi
 	return visible, hidden, nil
 }
 
-func (s *Service) beginAdding(ctx context.Context, tx *sqlstore.Tx, messageID int64, now time.Time) error {
+func (s *Service) beginAdding(ctx context.Context, tx *sqlstore.Tx, at place, now time.Time) error {
 	// The name prompt is the newer text input; a pending rename ends here.
-	if err := s.dropRename(ctx, tx, now); err != nil {
+	if err := s.dropRename(ctx, tx, at.Chat, now); err != nil {
 		return err
 	}
-	f, err := loadAdding(ctx, tx)
+	f, err := loadAdding(ctx, tx, at.Chat)
 	if err != nil {
 		return err
 	}
 	if len(f.Names) > f.Index {
-		return s.resumeAdding(ctx, tx, f, messageID, now)
+		return s.resumeAdding(ctx, tx, f, at, now)
 	}
 	if f.ScreenID != "" {
 		var old screen
@@ -143,14 +153,14 @@ func (s *Service) beginAdding(ctx context.Context, tx *sqlstore.Tx, messageID in
 		actions = append(actions, action{Label: "Вернуть подсказки", Kind: "show_names", View: "add"})
 	}
 	actions = append(actions, action{Label: "Отмена", Kind: "cancel_add"})
-	v := screen{ID: id, Text: "Добавление предметов\n\nВыберите название кнопкой или напишите своё. Можно прислать список: по одному предмету на строку, до 20.\nЗатем — резерв, текущий запас и подтверждение. Срок расхода можно уточнить по желанию.", Actions: actions, MessageID: messageID, ExpiresAt: now.Add(7 * 24 * time.Hour)}
+	v := screen{ID: id, Text: "Добавление предметов\n\nВыберите название кнопкой или напишите своё. Можно прислать список: по одному предмету на строку, до 20.\nЗатем — резерв, текущий запас и подтверждение. Срок расхода можно уточнить по желанию.", Actions: actions, MessageID: at.Message, ChatID: at.Chat, ExpiresAt: now.Add(7 * 24 * time.Hour)}
 	if err = tx.Insert(ctx, "screen", id, v); err != nil {
 		return err
 	}
-	if err = tx.Put(ctx, "runtime", "adding", addFlow{ScreenID: id}); err != nil {
+	if err = tx.Put(ctx, "runtime", inputKey("adding", at.Chat), addFlow{ScreenID: id}); err != nil {
 		return err
 	}
-	if err = tx.Put(ctx, "runtime", "awaiting_name", true); err != nil {
+	if err = tx.Put(ctx, "runtime", inputKey("awaiting_name", at.Chat), true); err != nil {
 		return err
 	}
 	return s.queue(ctx, tx, id, now, false, "")
@@ -158,13 +168,13 @@ func (s *Service) beginAdding(ctx context.Context, tx *sqlstore.Tx, messageID in
 
 // suggestionScreen replaces the name prompt and stays part of the same adding
 // flow: typed names, Cancel and /cancel keep working while it is open.
-func (s *Service) suggestionScreen(ctx context.Context, tx *sqlstore.Tx, messageID int64, now time.Time) error {
-	f, err := loadAdding(ctx, tx)
+func (s *Service) suggestionScreen(ctx context.Context, tx *sqlstore.Tx, at place, now time.Time) error {
+	f, err := loadAdding(ctx, tx, at.Chat)
 	if err != nil {
 		return err
 	}
 	if len(f.Names) > f.Index {
-		return s.resumeAdding(ctx, tx, f, messageID, now)
+		return s.resumeAdding(ctx, tx, f, at, now)
 	}
 	if f.ScreenID != "" {
 		var old screen
@@ -196,17 +206,17 @@ func (s *Service) suggestionScreen(ctx context.Context, tx *sqlstore.Tx, message
 	if err != nil {
 		return err
 	}
-	v := screen{ID: id, Text: text, Actions: actions, MessageID: messageID, ExpiresAt: now.Add(7 * 24 * time.Hour)}
+	v := screen{ID: id, Text: text, Actions: actions, MessageID: at.Message, ChatID: at.Chat, ExpiresAt: now.Add(7 * 24 * time.Hour)}
 	if err = tx.Insert(ctx, "screen", id, v); err != nil {
 		return err
 	}
-	if err = tx.Put(ctx, "runtime", "adding", addFlow{ScreenID: id}); err != nil {
+	if err = tx.Put(ctx, "runtime", inputKey("adding", at.Chat), addFlow{ScreenID: id}); err != nil {
 		return err
 	}
 	return s.queue(ctx, tx, id, now, false, "")
 }
 
-func (s *Service) hideSuggestion(ctx context.Context, tx *sqlstore.Tx, name string, messageID int64, now time.Time) error {
+func (s *Service) hideSuggestion(ctx context.Context, tx *sqlstore.Tx, name string, at place, now time.Time) error {
 	var stored []string
 	if err := tx.Get(ctx, "runtime", "hidden_names", &stored); err != nil && !errors.Is(err, sqlstore.ErrNotFound) {
 		return err
@@ -217,30 +227,30 @@ func (s *Service) hideSuggestion(ctx context.Context, tx *sqlstore.Tx, name stri
 			return err
 		}
 	}
-	return s.suggestionScreen(ctx, tx, messageID, now)
+	return s.suggestionScreen(ctx, tx, at, now)
 }
 
-func (s *Service) showSuggestions(ctx context.Context, tx *sqlstore.Tx, toPrompt bool, messageID int64, now time.Time) error {
+func (s *Service) showSuggestions(ctx context.Context, tx *sqlstore.Tx, toPrompt bool, at place, now time.Time) error {
 	if err := tx.Delete(ctx, "runtime", "hidden_names"); err != nil {
 		return err
 	}
 	if toPrompt {
-		return s.beginAdding(ctx, tx, messageID, now)
+		return s.beginAdding(ctx, tx, at, now)
 	}
-	return s.suggestionScreen(ctx, tx, messageID, now)
+	return s.suggestionScreen(ctx, tx, at, now)
 }
 
-func (s *Service) beginNames(ctx context.Context, tx *sqlstore.Tx, text string, messageID int64, now time.Time) error {
-	f, err := loadAdding(ctx, tx)
+func (s *Service) beginNames(ctx context.Context, tx *sqlstore.Tx, text string, at place, now time.Time) error {
+	f, err := loadAdding(ctx, tx, at.Chat)
 	if err != nil {
 		return err
 	}
 	if f.Index < len(f.Names) {
-		return s.note(ctx, tx, "Сначала завершите текущее добавление: /add продолжит, /cancel отменит оставшиеся. Новый список не принят.", nil, 0, now)
+		return s.note(ctx, tx, "Сначала завершите текущее добавление: /add продолжит, /cancel отменит оставшиеся. Новый список не принят.", nil, at.fresh(), now)
 	}
 	names, err := parseNames(text)
 	if err != nil {
-		return s.note(ctx, tx, err.Error(), nil, 0, now)
+		return s.note(ctx, tx, err.Error(), nil, at.fresh(), now)
 	}
 	states, err := tx.Items(ctx)
 	if err != nil {
@@ -260,7 +270,7 @@ func (s *Service) beginNames(ctx context.Context, tx *sqlstore.Tx, text string, 
 		}
 	}
 	if len(filtered) == 0 {
-		return s.note(ctx, tx, "Эти предметы уже есть в реестре или архиве: /items · /archive. Введите другие названия или /cancel.", nil, 0, now)
+		return s.note(ctx, tx, "Эти предметы уже есть в реестре или архиве: /items · /archive. Введите другие названия или /cancel.", nil, at.fresh(), now)
 	}
 	// Reuse the name-prompt message for text input; never leave its Cancel button live.
 	if f.ScreenID != "" {
@@ -268,21 +278,21 @@ func (s *Service) beginNames(ctx context.Context, tx *sqlstore.Tx, text string, 
 		if err = tx.Get(ctx, "screen", f.ScreenID, &old); err != nil {
 			return err
 		}
-		if messageID == 0 {
-			messageID = old.MessageID
+		if at.Message == 0 {
+			at.Message = old.MessageID
 		}
 		if err = s.retireScreen(ctx, tx, old, now); err != nil {
 			return err
 		}
 	}
-	if err = tx.Put(ctx, "runtime", "awaiting_name", false); err != nil {
+	if err = tx.Put(ctx, "runtime", inputKey("awaiting_name", at.Chat), false); err != nil {
 		return err
 	}
 	f = addFlow{Names: filtered}
-	return s.nextAdding(ctx, tx, f, messageID, now)
+	return s.nextAdding(ctx, tx, f, at, now)
 }
 
-func (s *Service) nextAdding(ctx context.Context, tx *sqlstore.Tx, f addFlow, messageID int64, now time.Time) error {
+func (s *Service) nextAdding(ctx context.Context, tx *sqlstore.Tx, f addFlow, at place, now time.Time) error {
 	id, err := opaqueID()
 	if err != nil {
 		return err
@@ -291,7 +301,7 @@ func (s *Service) nextAdding(ctx context.Context, tx *sqlstore.Tx, f addFlow, me
 	if err != nil {
 		return err
 	}
-	if err = s.saveNewDialog(ctx, tx, d, messageID, now); err != nil {
+	if err = s.saveNewDialog(ctx, tx, d, at, now); err != nil {
 		return err
 	}
 	f.ScreenID = id
@@ -305,10 +315,10 @@ func (s *Service) nextAdding(ctx context.Context, tx *sqlstore.Tx, f addFlow, me
 			return err
 		}
 	}
-	return tx.Put(ctx, "runtime", "adding", f)
+	return tx.Put(ctx, "runtime", inputKey("adding", at.Chat), f)
 }
 
-func (s *Service) resumeAdding(ctx context.Context, tx *sqlstore.Tx, f addFlow, messageID int64, now time.Time) error {
+func (s *Service) resumeAdding(ctx context.Context, tx *sqlstore.Tx, f addFlow, at place, now time.Time) error {
 	var old screen
 	if err := tx.Get(ctx, "screen", f.ScreenID, &old); err != nil {
 		return err
@@ -322,7 +332,7 @@ func (s *Service) resumeAdding(ctx context.Context, tx *sqlstore.Tx, f addFlow, 
 		return err
 	}
 	d.ID = id // Item ID stays fixed; the old keyboard becomes obsolete.
-	if err = s.saveNewDialog(ctx, tx, d, messageID, now); err != nil {
+	if err = s.saveNewDialog(ctx, tx, d, at, now); err != nil {
 		return err
 	}
 	f.ScreenID = id
@@ -334,14 +344,14 @@ func (s *Service) resumeAdding(ctx context.Context, tx *sqlstore.Tx, f addFlow, 
 	if err = tx.Put(ctx, "screen", id, v); err != nil {
 		return err
 	}
-	return tx.Put(ctx, "runtime", "adding", f)
+	return tx.Put(ctx, "runtime", inputKey("adding", at.Chat), f)
 }
 
 func (s *Service) advanceAdding(ctx context.Context, tx *sqlstore.Tx, v screen, now time.Time) error {
 	if v.Dialog == nil || !v.Dialog.Creating {
 		return nil
 	}
-	f, err := loadAdding(ctx, tx)
+	f, err := loadAdding(ctx, tx, v.ChatID)
 	if err != nil {
 		return err
 	}
@@ -350,13 +360,13 @@ func (s *Service) advanceAdding(ctx context.Context, tx *sqlstore.Tx, v screen, 
 	} // A persisted legacy wizard has no queue.
 	f.Index++
 	if f.Index >= len(f.Names) {
-		return tx.Delete(ctx, "runtime", "adding")
+		return tx.Delete(ctx, "runtime", inputKey("adding", v.ChatID))
 	}
-	return s.nextAdding(ctx, tx, f, 0, now)
+	return s.nextAdding(ctx, tx, f, place{Chat: v.ChatID}, now)
 }
 
-func (s *Service) cancelAdding(ctx context.Context, tx *sqlstore.Tx, messageID int64, now time.Time) error {
-	f, err := loadAdding(ctx, tx)
+func (s *Service) cancelAdding(ctx context.Context, tx *sqlstore.Tx, at place, now time.Time) error {
+	f, err := loadAdding(ctx, tx, at.Chat)
 	if err != nil {
 		return err
 	}
@@ -365,8 +375,8 @@ func (s *Service) cancelAdding(ctx context.Context, tx *sqlstore.Tx, messageID i
 		if err = tx.Get(ctx, "screen", f.ScreenID, &old); err != nil {
 			return err
 		}
-		if messageID == 0 {
-			messageID = old.MessageID
+		if at.Message == 0 {
+			at.Message = old.MessageID
 		}
 		if err = s.retireScreen(ctx, tx, old, now); err != nil {
 			return err
@@ -377,11 +387,11 @@ func (s *Service) cancelAdding(ctx context.Context, tx *sqlstore.Tx, messageID i
 			}
 		}
 	}
-	if err = tx.Delete(ctx, "runtime", "adding"); err != nil {
+	if err = tx.Delete(ctx, "runtime", inputKey("adding", at.Chat)); err != nil {
 		return err
 	}
-	if err = tx.Put(ctx, "runtime", "awaiting_name", false); err != nil {
+	if err = tx.Put(ctx, "runtime", inputKey("awaiting_name", at.Chat), false); err != nil {
 		return err
 	}
-	return s.note(ctx, tx, "Добавление отменено. Уже сохранённые предметы остались в реестре.\n/add — добавить · /items — предметы", nil, messageID, now)
+	return s.note(ctx, tx, "Добавление отменено. Уже сохранённые предметы остались в реестре.\n/add — добавить · /items — предметы", nil, at, now)
 }
