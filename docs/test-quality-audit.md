@@ -154,6 +154,20 @@ The MCP slice added four required mutations, each written together with its witn
 
 The full 32-change campaign ran locally on Windows 11 amd64 with Go 1.26 and scoop GCC (`PYTHONUTF8=1`): 31 required faults detected by their named witnesses, M28 survived as disclosed. Because these cases were written with the feature, they are regression protection for the agent boundary, not an independent measure of how good its tests are. No CI run on this change is claimed here.
 
+## Rename and name-suggestion additions (2026-10-25)
+
+Renaming and hidden `/add` shortcuts added five required mutations, again written together with their witnesses:
+
+| ID | Change | Witness |
+|---|---|---|
+| M33 | Move the saved question date when an item is renamed | `TestRenameKeepsEvidenceOverduePlanLinksAndOtherItem` |
+| M34 | Show hidden name suggestions again | `TestHiddenSuggestionsPersistAndTypingStillWorks` |
+| M35 | Keep taking text as a name after the rename prompt was used | `TestRenamePromptEndsOnTapExpiryNewerAnswerAndAdding` |
+| M36 | Rename over a newer answer | `TestRenamePromptEndsOnTapExpiryNewerAnswerAndAdding` |
+| M37 | Rename onto a name another item already uses | `TestRenameRejectsTakenAndInvalidNamesUntilCancelled` |
+
+The full 37-change campaign ran locally on Windows 11 amd64 with scoop GCC (`python -X utf8`): 36 required faults were detected by their named witnesses, and M28 survived as disclosed. These cases protect the new paths against regression. They do not measure independently how good the tests are. No CI run on this change is claimed here.
+
 ## Remaining uncertainty
 
 These are selected mutations, not a whole-program operator sweep, and the new cases were chosen after inspecting the initial survivors. Detection of these faults is concrete regression evidence, not independent statistical validation of all tests. A passing scenario proves neither production availability nor the usefulness of a forecast to a household.

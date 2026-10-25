@@ -15,6 +15,22 @@ import (
 
 func (s *Service) command(ctx context.Context, tx *sqlstore.Tx, text string, now time.Time) error {
 	text = strings.TrimSpace(text)
+	r, prompt, renaming, e := s.activeRename(ctx, tx)
+	if e != nil {
+		return e
+	}
+	if renaming {
+		if !strings.HasPrefix(text, "/") {
+			return s.finishRename(ctx, tx, r, prompt, text, now)
+		}
+		// Any command closes the prompt, so a later message is never taken as a name.
+		if e = s.dropRename(ctx, tx, now); e != nil {
+			return e
+		}
+		if text == "/cancel" {
+			return s.note(ctx, tx, "Переименование отменено, название прежнее.", nil, 0, now)
+		}
+	}
 	if text == "/start" || text == "/items" {
 		return s.menu(ctx, tx, "all", 0, nil, 0, now)
 	}

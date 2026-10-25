@@ -190,7 +190,7 @@ func (s *Service) routeCallback(ctx context.Context, tx *sqlstore.Tx, cb telegra
 		}
 		a := v.Actions[n]
 		switch a.Kind {
-		case "manage", "settings", "setting", "config_preview", "archive_preview", "control":
+		case "manage", "settings", "setting", "config_preview", "archive_preview", "control", "rename":
 			notice, err := s.managementCallback(ctx, tx, a, v.ID, v.MessageID, now)
 			if err == nil && notice != "" {
 				err = s.retireScreen(ctx, tx, v, now)
@@ -215,6 +215,12 @@ func (s *Service) routeCallback(ctx context.Context, tx *sqlstore.Tx, cb telegra
 			return "", s.beginAdding(ctx, tx, v.MessageID, now)
 		case "add_name":
 			return "", s.beginNames(ctx, tx, a.Field, v.MessageID, now)
+		case "hide_menu":
+			return "", s.suggestionScreen(ctx, tx, v.MessageID, now)
+		case "hide_name":
+			return "Подсказка скрыта.", s.hideSuggestion(ctx, tx, a.Field, v.MessageID, now)
+		case "show_names":
+			return "Подсказки возвращены.", s.showSuggestions(ctx, tx, a.View == "add", v.MessageID, now)
 		case "cancel_add":
 			return "Отменено.", s.cancelAdding(ctx, tx, v.MessageID, now)
 		default:

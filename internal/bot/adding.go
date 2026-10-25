@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -31,6 +32,14 @@ func loadAdding(ctx context.Context, tx *sqlstore.Tx) (addFlow, error) {
 	return f, err
 }
 
+// validName applies to every typed name: new items and renames.
+func validName(name string) error {
+	if !utf8.ValidString(name) || utf8.RuneCountInString(name) > 80 || strings.IndexFunc(name, unicode.IsControl) >= 0 || strings.HasPrefix(name, "/") {
+		return errors.New("Название: до 80 символов, без команд и управляющих символов.")
+	}
+	return nil
+}
+
 func parseNames(text string) ([]string, error) {
 	if len(text) > 10000 {
 		return nil, errors.New("Список слишком длинный: до 20 названий, по одному на строку.")
@@ -41,8 +50,8 @@ func parseNames(text string) ([]string, error) {
 		if name == "" {
 			continue
 		}
-		if !utf8.ValidString(name) || utf8.RuneCountInString(name) > 80 || strings.IndexFunc(name, unicode.IsControl) >= 0 || strings.HasPrefix(name, "/") {
-			return nil, errors.New("Название: до 80 символов, без команд и управляющих символов.")
+		if err := validName(name); err != nil {
+			return nil, err
 		}
 		found := false
 		for _, old := range names {
@@ -64,7 +73,41 @@ func parseNames(text string) ([]string, error) {
 	return names, nil
 }
 
+// suggestions leaves out names already in the registry or archive and the ones
+// the owner hid. Hiding a shortcut never blocks typing the same name.
+func (s *Service) suggestions(ctx context.Context, tx *sqlstore.Tx) (visible, hidden []string, err error) {
+	var stored []string
+	if err = tx.Get(ctx, "runtime", "hidden_names", &stored); err != nil && !errors.Is(err, sqlstore.ErrNotFound) {
+		return nil, nil, err
+	}
+	states, err := tx.Items(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, name := range commonNames {
+		exists := false
+		for _, state := range states {
+			if strings.EqualFold(state.Config.Name, name) {
+				exists = true
+				break
+			}
+		}
+		switch {
+		case exists:
+		case slices.Contains(stored, name):
+			hidden = append(hidden, name)
+		default:
+			visible = append(visible, name)
+		}
+	}
+	return visible, hidden, nil
+}
+
 func (s *Service) beginAdding(ctx context.Context, tx *sqlstore.Tx, messageID int64, now time.Time) error {
+	// The name prompt is the newer text input; a pending rename ends here.
+	if err := s.dropRename(ctx, tx, now); err != nil {
+		return err
+	}
 	f, err := loadAdding(ctx, tx)
 	if err != nil {
 		return err
@@ -85,22 +128,19 @@ func (s *Service) beginAdding(ctx context.Context, tx *sqlstore.Tx, messageID in
 	if err != nil {
 		return err
 	}
-	states, err := tx.Items(ctx)
+	visible, hidden, err := s.suggestions(ctx, tx)
 	if err != nil {
 		return err
 	}
 	actions := []action{}
-	for _, name := range commonNames {
-		exists := false
-		for _, state := range states {
-			if strings.EqualFold(state.Config.Name, name) {
-				exists = true
-				break
-			}
-		}
-		if !exists {
-			actions = append(actions, action{Label: name, Kind: "add_name", Field: name})
-		}
+	for _, name := range visible {
+		actions = append(actions, action{Label: name, Kind: "add_name", Field: name})
+	}
+	if len(visible) > 0 {
+		actions = append(actions, action{Label: "Скрыть подсказки", Kind: "hide_menu"})
+	} else if len(hidden) > 0 {
+		// It shares the Cancel row, so keeping the way back costs no space.
+		actions = append(actions, action{Label: "Вернуть подсказки", Kind: "show_names", View: "add"})
 	}
 	actions = append(actions, action{Label: "Отмена", Kind: "cancel_add"})
 	v := screen{ID: id, Text: "Добавление предметов\n\nВыберите название кнопкой или напишите своё. Можно прислать список: по одному предмету на строку, до 20.\nЗатем — резерв, текущий запас и подтверждение. Срок расхода можно уточнить по желанию.", Actions: actions, MessageID: messageID, ExpiresAt: now.Add(7 * 24 * time.Hour)}
@@ -114,6 +154,80 @@ func (s *Service) beginAdding(ctx context.Context, tx *sqlstore.Tx, messageID in
 		return err
 	}
 	return s.queue(ctx, tx, id, now, false, "")
+}
+
+// suggestionScreen replaces the name prompt and stays part of the same adding
+// flow: typed names, Cancel and /cancel keep working while it is open.
+func (s *Service) suggestionScreen(ctx context.Context, tx *sqlstore.Tx, messageID int64, now time.Time) error {
+	f, err := loadAdding(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if len(f.Names) > f.Index {
+		return s.resumeAdding(ctx, tx, f, messageID, now)
+	}
+	if f.ScreenID != "" {
+		var old screen
+		if err = tx.Get(ctx, "screen", f.ScreenID, &old); err != nil {
+			return err
+		}
+		if err = s.retireScreen(ctx, tx, old, now); err != nil {
+			return err
+		}
+	}
+	visible, hidden, err := s.suggestions(ctx, tx)
+	if err != nil {
+		return err
+	}
+	text := "Подсказки в /add\n\nНажмите на подсказку, чтобы скрыть её."
+	if len(visible) == 0 {
+		text = "Подсказки в /add\n\nВсе подсказки скрыты."
+	}
+	text += " Любое название по-прежнему можно написать текстом."
+	actions := []action{}
+	for _, name := range visible {
+		actions = append(actions, action{Label: "✕ " + name, Kind: "hide_name", Field: name})
+	}
+	if len(hidden) > 0 {
+		actions = append(actions, action{Label: "Вернуть скрытые", Kind: "show_names"})
+	}
+	actions = append(actions, action{Label: "Готово", Kind: "add"})
+	id, err := opaqueID()
+	if err != nil {
+		return err
+	}
+	v := screen{ID: id, Text: text, Actions: actions, MessageID: messageID, ExpiresAt: now.Add(7 * 24 * time.Hour)}
+	if err = tx.Insert(ctx, "screen", id, v); err != nil {
+		return err
+	}
+	if err = tx.Put(ctx, "runtime", "adding", addFlow{ScreenID: id}); err != nil {
+		return err
+	}
+	return s.queue(ctx, tx, id, now, false, "")
+}
+
+func (s *Service) hideSuggestion(ctx context.Context, tx *sqlstore.Tx, name string, messageID int64, now time.Time) error {
+	var stored []string
+	if err := tx.Get(ctx, "runtime", "hidden_names", &stored); err != nil && !errors.Is(err, sqlstore.ErrNotFound) {
+		return err
+	}
+	// A screen from an older shortcut list just re-renders; it must not poison the update.
+	if slices.Contains(commonNames, name) && !slices.Contains(stored, name) {
+		if err := tx.Put(ctx, "runtime", "hidden_names", append(stored, name)); err != nil {
+			return err
+		}
+	}
+	return s.suggestionScreen(ctx, tx, messageID, now)
+}
+
+func (s *Service) showSuggestions(ctx context.Context, tx *sqlstore.Tx, toPrompt bool, messageID int64, now time.Time) error {
+	if err := tx.Delete(ctx, "runtime", "hidden_names"); err != nil {
+		return err
+	}
+	if toPrompt {
+		return s.beginAdding(ctx, tx, messageID, now)
+	}
+	return s.suggestionScreen(ctx, tx, messageID, now)
 }
 
 func (s *Service) beginNames(ctx context.Context, tx *sqlstore.Tx, text string, messageID int64, now time.Time) error {

@@ -25,8 +25,10 @@ func navGroup(a action) string {
 	switch a.Kind {
 	case "page":
 		return "page"
-	case "add", "view":
+	case "add", "view", "hide_menu", "show_names", "cancel_add":
 		return "menu"
+	case "settings", "rename":
+		return "item"
 	}
 	return ""
 }

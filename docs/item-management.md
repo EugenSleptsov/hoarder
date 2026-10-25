@@ -1,12 +1,14 @@
 # Item lifecycle and explicit settings
 
-Status: implemented initial slice, 2026-09-16. Code and tests live in `internal/item/controls.go`, `internal/bot/management.go` and their regression tests. This does not establish production readiness or forecasting accuracy.
+Status: implemented initial slice, 2026-09-16; renaming added 2026-10-25. Code and tests live in `internal/item/controls.go`, `internal/bot/management.go`, `internal/bot/rename.go` and their regression tests. This does not establish production readiness or forecasting accuracy.
 
 ## User flow
 
 `/manage` or the registry's management button opens a list of non-archived items. Each item card exposes a manual stock check, settings, pause/resume and archive confirmation. `/archive` lists archived items and offers restoration onto pause. Normal stock checks retain their previous direct path; management is not an extra mandatory step.
 
 Settings offer fixed reserve 0/1 package, purchase lead time 1/3/7/14 days and maximum observation gap 7/30/90/180 days. Selecting a value displays the old and new configuration; only confirmation changes it. Saving identical configuration is a no-op for the item revision, history and dates.
+
+Rename (added 2026-10-25) asks for the new name as the next text message: one line of at most 80 characters, no command prefix. The name must not match another item, archived ones included, case-insensitively; changing only the case of the item's own name is allowed. The typed message is the explicit act, so there is no extra confirmation screen. The card then shows the old and new name.
 
 ## State semantics
 
@@ -15,6 +17,8 @@ Pause suppresses proactive questions and hides the item's shopping recommendatio
 Pause, resume, archive and restore preserve the previously selected plan date. Only its expected item revision changes. Resume does not move an overdue deadline into the future or send an unsolicited message outside the daily window. Restore clears the archived flag but leaves the item paused; reactivation is explicit.
 
 Archival requires confirmation and retains immutable history. It is not secure erasure. Names and observations may also remain in backups and Telegram history. An archived name cannot be reused through ordinary onboarding; restore the original item instead.
+
+A rename is a `reconfigure` event whose configuration differs only in `Name`. It keeps evidence, rate, samples, item ID, shop links and the saved plan date, overdue dates included. A name is presentation, not evidence, so it never re-plans. Only the plan's expected revision follows the item, and an open stock question for the item is retired because it shows the old name and revision. The pending rename is a `runtime/renaming` record bound to one prompt screen and to the item revision on that prompt. It ends when any prompt button is tapped, after 30 minutes, on `/cancel` or any other command, or when `/add` opens. A changed item revision rejects the typed name instead of applying it over a newer answer.
 
 An explicit configuration change preserves physical evidence, rates and samples. It recalculates only that item's plan and purchase recommendation. Neither enabling a reserve nor increasing lead time adds stock. The algorithm never changes the reserve automatically. Resume also reconciles the recommendation against current projected stock without changing evidence or the saved plan date.
 
@@ -40,4 +44,4 @@ Tests cover pause without evidence changes, overdue resume, cancellation and con
 
 ## Still outside this slice
 
-Renaming, package-unit conversion, arbitrary numeric settings, permanent data erasure, correcting old events, shared schedule migration, multi-user control and automatic cleanup remain separate work. The forecasting algorithm and seasonal-learning limitations are unchanged.
+Package-unit conversion, arbitrary numeric settings, permanent data erasure, correcting old events, shared schedule migration, multi-user control and automatic cleanup remain separate work. The forecasting algorithm and seasonal-learning limitations are unchanged.

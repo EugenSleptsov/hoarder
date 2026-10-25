@@ -1,6 +1,6 @@
 # Implementation roadmap
 
-Status: 2026-10-24. `cmd/hoarder` is a runnable single-owner Telegram bot with SQLite, inline callbacks, independent saved plans, daily delivery, item management and an optional MCP endpoint for an external shopping agent. This is an initial implementation, not a production-readiness or forecast-accuracy claim.
+Status: 2026-10-25. `cmd/hoarder` is a runnable single-owner Telegram bot with SQLite, inline callbacks, independent saved plans, daily delivery, item management (including renaming) and an optional MCP endpoint for an external shopping agent. This is an initial implementation, not a production-readiness or forecast-accuracy claim.
 
 ## Invariants
 
@@ -20,7 +20,9 @@ Stored dates survive ticks and restart instead of being perpetually recalculated
 
 Pause/resume, reversible confirmed archival, restoration onto pause and explicit reserve/lead-time/check-gap settings are now implemented through callbacks. Controls preserve stock/rate/observation anchors. Lifecycle controls keep the saved deadline, including overdue dates; configuration changes replan exactly one item. No-op settings preserve revision and deadline. Recommendations reconcile after explicit configuration changes/resume without creating purchases.
 
-Pending: renaming and package-unit changes, correcting historical answers, explicit shared schedule migration and a measured per-item retry/backoff policy. Unanswered or uncertain due items may still appear the next day. Notification pause is never evidence of zero consumption.
+Renaming (2026-10-25) is a name-only `reconfigure` event that keeps evidence, links and the saved, possibly overdue, plan date. The text prompt is bound to the shown revision and expires after 30 minutes. Name shortcuts in `/add` can be hidden and restored.
+
+Pending: package-unit changes, correcting historical answers, explicit shared schedule migration and a measured per-item retry/backoff policy. Unanswered or uncertain due items may still appear the next day. Notification pause is never evidence of zero consumption.
 
 ## H003 — Daily sessions and outbox: implemented single-process slice
 

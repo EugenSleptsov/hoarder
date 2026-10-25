@@ -30,6 +30,8 @@ Late HTTP errors are checked against the latest screen/job so an old failed edit
 
 `/add` and the Add button open typing shortcuts for common names. The shortcuts are names only; rates, reserves and inventories are never borrowed from another item or a learned category.
 
+Names already used by an item, archived ones included, are not offered. The owner can hide the rest: "Скрыть подсказки" opens a screen where a tap hides one shortcut, and "Вернуть скрытые" restores all of them. The hidden set is the `runtime/hidden_names` record, so it survives restarts. While every shortcut is hidden, the prompt shows "Вернуть подсказки" in the Cancel row instead. The suggestion screen replaces the name prompt within the same adding flow and message: typed names, Cancel and `/cancel` keep working there, and a typed name retires it. Hiding a shortcut never blocks typing that name.
+
 After a name, `NewQuick` starts:
 
 1. Reserve policy: fixed zero or one package.

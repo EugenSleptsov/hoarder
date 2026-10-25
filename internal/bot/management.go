@@ -23,6 +23,11 @@ func configurationText(c item.Config) string {
 }
 
 func (s *Service) managementCard(ctx context.Context, tx *sqlstore.Tx, state item.State, messageID int64, now time.Time) error {
+	return s.managementCardWith(ctx, tx, state, "", messageID, now)
+}
+
+// managementCardWith puts lead above the card: a text reply has no callback toast.
+func (s *Service) managementCardWith(ctx context.Context, tx *sqlstore.Tx, state item.State, lead string, messageID int64, now time.Time) error {
 	status := "Опросы включены"
 	if state.Paused {
 		status = "Пауза: расход по прогнозу продолжается"
@@ -31,6 +36,9 @@ func (s *Service) managementCard(ctx context.Context, tx *sqlstore.Tx, state ite
 		status = "В архиве: история сохранена, опросы выключены"
 	}
 	text := state.Config.Name + "\n\n" + status + "\n" + configurationText(state.Config)
+	if lead != "" {
+		text = lead + "\n\n" + text
+	}
 	var plan app.QuestionPlan
 	if err := tx.Get(ctx, "plan", state.Config.ID, &plan); err != nil {
 		return err
@@ -49,7 +57,7 @@ func (s *Service) managementCard(ctx context.Context, tx *sqlstore.Tx, state ite
 	if state.Archived {
 		actions = append(actions, control("Восстановить на паузе", item.Restore))
 	} else {
-		actions = append(actions, itemAction("Проверить остаток", "check", state), itemAction("Настройки", "settings", state))
+		actions = append(actions, itemAction("Проверить остаток", "check", state), itemAction("Настройки", "settings", state), itemAction("Переименовать", "rename", state))
 		if state.Paused {
 			actions = append(actions, control("Возобновить опросы", item.Resume))
 		} else {
@@ -90,6 +98,8 @@ func (s *Service) managementCallback(ctx context.Context, tx *sqlstore.Tx, a act
 		return "", s.note(ctx, tx, state.Config.Name+"\n\n"+configurationText(state.Config), actions, messageID, now)
 	case "setting":
 		return "", s.settingChoices(ctx, tx, state, a.Field, messageID, now)
+	case "rename":
+		return "", s.beginRename(ctx, tx, state, messageID, now)
 	case "config_preview":
 		if a.Configuration == nil || a.Configuration.ID != state.Config.ID || a.Configuration.Validate() != nil {
 			return "Некорректные настройки.", nil

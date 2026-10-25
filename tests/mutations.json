@@ -286,5 +286,50 @@
     "after": "if false && sent >= maxNotifications {",
     "required": true,
     "witness": "TestRequestChecksAskNowAndNotificationsAreCapped"
+  },
+  {
+    "id": "M33",
+    "title": "Move the saved question date when an item is renamed",
+    "path": "internal/bot/rename.go",
+    "before": "plan.ExpectedRevision = next.Revision",
+    "after": "plan.ExpectedRevision, plan.SendAt = next.Revision, now.Add(time.Hour)",
+    "required": true,
+    "witness": "TestRenameKeepsEvidenceOverduePlanLinksAndOtherItem"
+  },
+  {
+    "id": "M34",
+    "title": "Show hidden name suggestions again",
+    "path": "internal/bot/adding.go",
+    "before": "case slices.Contains(stored, name):",
+    "after": "case false && slices.Contains(stored, name):",
+    "required": true,
+    "witness": "TestHiddenSuggestionsPersistAndTypingStillWorks"
+  },
+  {
+    "id": "M35",
+    "title": "Keep taking text as a name after the rename prompt was used",
+    "path": "internal/bot/rename.go",
+    "before": "if err != nil || v.Used {",
+    "after": "if err != nil {",
+    "required": true,
+    "witness": "TestRenamePromptEndsOnTapExpiryNewerAnswerAndAdding"
+  },
+  {
+    "id": "M36",
+    "title": "Rename over a newer answer",
+    "path": "internal/bot/rename.go",
+    "before": "state.Archived || state.Revision != r.ExpectedRevision {",
+    "after": "state.Archived {",
+    "required": true,
+    "witness": "TestRenamePromptEndsOnTapExpiryNewerAnswerAndAdding"
+  },
+  {
+    "id": "M37",
+    "title": "Rename onto a name another item already uses",
+    "path": "internal/bot/rename.go",
+    "before": "other.Config.ID != state.Config.ID && strings.EqualFold(other.Config.Name, text)",
+    "after": "false && other.Config.ID != state.Config.ID && strings.EqualFold(other.Config.Name, text)",
+    "required": true,
+    "witness": "TestRenameRejectsTakenAndInvalidNamesUntilCancelled"
   }
 ]
