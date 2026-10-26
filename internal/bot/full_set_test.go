@@ -62,6 +62,28 @@ func TestFullSetSizesTheShoppingAmountWithoutResettingStock(t *testing.T) {
 	}
 }
 
+// Delivered units cannot be used before they arrive. An item that is empty, or
+// may run out before the delivery, needs only what tops the remnant at the
+// delivery up to the set plus reserve.
+func TestFullSetIsCountedAtTheDeliveryNotBeforeIt(t *testing.T) {
+	h := newHarness(t)
+	h.add("Соль", false, "Нет", "Пусто")
+	salt := h.needs(h.now.Add(36*time.Hour), false)["Соль"]
+	if !salt.NeededByUntil || salt.FullSetUnits != 1 || salt.StockAtUntil != (item.Interval{}) || *salt.MinUnitsToCover != 1 || *salt.UnitsToFullSet != 1 {
+		t.Fatal("an empty item needs one package for a full set of one", salt)
+	}
+
+	h.addSet("Влажная бумага", "Примерно половина набора")
+	n := h.needs(h.now.Add(60*24*time.Hour), false)["Влажная бумага"]
+	fill := *n.UnitsToFullSet
+	if n.StockAtUntil.Low != 0 || n.StockAtUntil.High == 0 {
+		t.Fatal("the stock should possibly run out before the delivery", n.StockAtUntil)
+	}
+	if fill <= *n.MinUnitsToCover || n.StockAtUntil.Mid()+float64(fill) < 8 || n.StockAtUntil.Mid()+float64(fill-1) >= 8 {
+		t.Fatal("the cart is not sized from the remnant at the delivery", n)
+	}
+}
+
 func TestStockChecksCountManyClosedPackages(t *testing.T) {
 	h := newHarness(t)
 	h.addSet("Влажная бумага", "Сейчас нет")

@@ -529,5 +529,14 @@
     "after": "if false {",
     "required": true,
     "witness": "TestDailyQuestionsGoToEachMemberWhoWantsThem"
+  },
+  {
+    "id": "M60",
+    "title": "Charge use before the delivery to the delivered units",
+    "path": "internal/bot/agent.go",
+    "before": "Kind: item.Addition, At: until,",
+    "after": "Kind: item.Addition, At: state.AsOf,",
+    "required": true,
+    "witness": "TestFullSetIsCountedAtTheDeliveryNotBeforeIt"
   }
 ]

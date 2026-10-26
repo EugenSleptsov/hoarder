@@ -208,6 +208,16 @@ Invitations, per-chat screens and input, per-person daily digests and the schema
 
 The full 59-change campaign ran locally (Windows 11 amd64, Go 1.26.1, scoop GCC, `python -X utf8`). 56 required faults were detected by their named witnesses and M28 survived as disclosed. M53 and M58 were first written so that the mutated source did not compile (an unused import and an unused variable); the runner reported them as invalid, not detected. After the cases were rewritten, a rerun of those two detected both, each failing only its witness. As before, this is regression evidence for the new paths, written together with them, not an independent measure of test quality, and no CI run is claimed.
 
+## Full set counted at the delivery (2026-10-26)
+
+The shopping agent reported `units_to_full_set` = 2 for two empty items with a full set of one and no reserve. The probe added the units at the evaluation start, so use between now and the delivery was charged to packages that had not arrived; the zero floor of the projection had absorbed that use for the empty stock. The probe now adds them at `until`, which matches the existing contract test (the remnant at `until` plus the purchase reaches the set plus reserve). The minimum to cover still probes at the start and stays a lower bound.
+
+| ID | Change | Witness |
+|---|---|---|
+| M60 | Charge use before the delivery to the delivered units | `TestFullSetIsCountedAtTheDeliveryNotBeforeIt` |
+
+The new test failed before the fix. The full 60-change campaign then ran locally on the fixed sources (Windows 11 amd64, Go 1.26.1, scoop GCC): 59 required faults were detected by their named witnesses, and M28 survived as disclosed. No CI run is claimed.
+
 ## Remaining uncertainty
 
 These are selected mutations, not a whole-program operator sweep, and the new cases were chosen after inspecting the initial survivors. Detection of these faults is concrete regression evidence, not independent statistical validation of all tests. A passing scenario proves neither production availability nor the usefulness of a forecast to a household.

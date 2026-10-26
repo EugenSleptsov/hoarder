@@ -72,7 +72,9 @@ type Need struct {
 	MinUnitsToCover *int `json:"min_units_to_cover"`
 	// UnitsToFullSet is what to buy: the smallest whole number of units after
 	// which the projected stock at Until reaches the full set plus the reserve,
-	// never less than MinUnitsToCover. It sizes a cart, it never resets stock.
+	// never less than MinUnitsToCover. The units count as delivered at Until,
+	// so no use before it is charged to them. It sizes a cart, it never resets
+	// stock.
 	// Zero when the item is not needed; nil when the minimum is unknown too.
 	UnitsToFullSet *int       `json:"units_to_full_set"`
 	Links          []ShopLink `json:"links"`
@@ -201,7 +203,7 @@ func need(state item.State, now, until time.Time) (Need, error) {
 	if n.MinUnitsToCover == nil {
 		return n, nil
 	}
-	fill, err := unitsToFullSet(state, start, until)
+	fill, err := unitsToFullSet(state, until)
 	if err != nil {
 		return Need{}, err
 	}
@@ -212,14 +214,17 @@ func need(state item.State, now, until time.Time) (Need, error) {
 	return n, nil
 }
 
-// unitsToFullSet probes whole additions at start, exactly as a delivery adds
-// them, until the stock projected at until reaches the full set plus reserve.
-func unitsToFullSet(state item.State, start, until time.Time) (*int, error) {
+// unitsToFullSet probes whole additions at until, exactly as a delivery then
+// adds them, until the stock there reaches the full set plus reserve. Units
+// added earlier would be charged with use before they arrive, even when the
+// item is already empty. Stock never grows, so the same units also fill the
+// set after any earlier delivery; covering use up to until is the minimum's job.
+func unitsToFullSet(state item.State, until time.Time) (*int, error) {
 	target := state.Config.FullSet() + state.Config.ReserveUnits
 	for units := 0; units <= maxFillUnits; units++ {
 		next := state
 		if units > 0 {
-			probe := item.Event{ID: "probe", ItemID: state.Config.ID, Kind: item.Addition, At: start,
+			probe := item.Event{ID: "probe", ItemID: state.Config.ID, Kind: item.Addition, At: until,
 				Quantity: item.Interval{Low: float64(units), High: float64(units)}}
 			var err error
 			if next, err = state.Apply(probe); err != nil {
